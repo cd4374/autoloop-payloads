@@ -1,0 +1,18 @@
+{
+  "paper_type": "NeurIPS",
+  "domain": "ai-exp",
+  "format": "NeurIPS",
+  "paper_domain": "ai-exp",
+  "created_at": "2026-04-13T00:27:29.488041",
+  "derived_thresholds": {
+    "min_references": 30,
+    "min_figures": 5,
+    "min_tables": 1,
+    "abstract_max_words": 250,
+    "page_limit": 9,
+    "min_experiment_runs": 3,
+    "require_ablation": true,
+    "min_recent_refs_pct": 30
+  },
+  "exemptions": {}
+}
