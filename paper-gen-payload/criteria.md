@@ -301,7 +301,7 @@
   title: 数据完整性
   severity: blocking
   evaluator: llm
-  depends_on: ["PG-001", "PG-023"]
+  depends_on: ["PG-001", "PG-023", "PG-042", "PG-043"]
   pass_condition: "integrity-checker 报告 pass=true，无数据伪造、无图像操纵、无抄袭（相似度 <=15%）。所有数字可从 logs/ 追溯。"
   fix_hint: "修复数据完整性问题。"
   fix_skill: loop-run
@@ -382,3 +382,63 @@
   fix_hint: "改进写作质量。优化句子结构，确保逻辑连贯，检查拼写和语法错误。"
   fix_skill: loop-run
   fix_skill_args: "PAYLOAD=paper-gen-payload/writing-payload"
+
+- id: PG-040
+  title: 运行时受限冒烟验证
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-033", "PG-014"]
+  pass_condition: "存在受限冒烟运行证据（runtime-proof.json），并证明入口命令在 timeout 下真实执行成功（非仅 py_compile）。"
+  fix_hint: "执行 runtime-proof-payload，生成并更新 .paper/state/runtime-proof.json，确保 command/timeout/exit_code/timestamp 证据完整。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/runtime-proof-payload"
+
+- id: PG-041
+  title: 外部审查证据固定 schema
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-027"]
+  pass_condition: ".paper/state/external-review-log.json 存在，字段完整（provider/model/timestamp/verdict/raw_feedback/reviewer_role/request_id），且 verdict 非 blocking。"
+  fix_hint: "执行 external-review-enforcer-payload，按固定路径与 schema 写入外部评审证据。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/external-review-enforcer-payload"
+
+- id: PG-042
+  title: 数值结果可追溯证据链
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-024", "PG-032"]
+  pass_condition: ".paper/state/evidence-trace.json 中每个 claim 可映射到 .paper/output/logs/run_*.log 的具体定位，且映射文件全部存在。"
+  fix_hint: "执行 evidence-trace-payload，补全 claim->log 映射并修复缺失日志。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/evidence-trace-payload"
+
+- id: PG-043
+  title: 真实外部查重 API 达标
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-020"]
+  pass_condition: "存在真实外部 API 查重报告（plagiarism-report.json），status=success 且 similarity_pct<=15；无配置或调用失败视为 FAIL。"
+  fix_hint: "执行 plagiarism-api-payload，配置真实 API 并生成可审计查重报告，直至相似度达标。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/plagiarism-api-payload"
+
+- id: PG-044
+  title: 数据集版本与许可证合规
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-012"]
+  pass_condition: "dataset-inventory.json 完整记录数据集 version/source/license/usage_terms，且无许可证冲突。"
+  fix_hint: "执行 dataset-license-payload，补全数据集清单、版本与许可证合规信息。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/dataset-license-payload"
+
+- id: PG-045
+  title: payload 协议 lint 通过
+  severity: advisory
+  evaluator: script
+  depends_on: ["PG-038"]
+  pass_condition: "paper-gen-payload 体系通过 payload-linter：三件套完整、depends_on 合法无环、script criteria 与 eval 输出集合一致。"
+  fix_hint: "执行 payload-linter-payload，修复协议不一致与结构错误。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/payload-linter-payload"

@@ -10,61 +10,76 @@ SESSION_FILE="$SCRIPT_DIR/session.md"
 
 # Load configuration from session.md frontmatter
 load_config() {
-    python3 -c "
-import yaml, re, os
+    python3 - <<PYEOF
+import re, json
 
 with open('$SESSION_FILE') as f:
     content = f.read()
 
-# Parse YAML frontmatter
+# Parse frontmatter without external dependencies (PyYAML may be unavailable)
 match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+frontmatter = {}
 if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    defaults = {
-        'paper_type': 'NeurIPS',
-        'domain': 'ai-exp',
-        'min_references': 30,
-        'min_figures': 5,
-        'min_tables': 1,
-        'page_limit': 9,
-        'abstract_max_words': 250,
-        'min_experiment_runs': 3,
-        'require_ablation': True,
-        'min_recent_refs_pct': 30,
-    }
-    for k, v in defaults.items():
-        if k not in frontmatter:
-            frontmatter[k] = v
+    for raw in match.group(1).splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#') or ':' not in line:
+            continue
+        k, v = line.split(':', 1)
+        key = k.strip()
+        val = v.strip().strip('"').strip("'")
+        low = val.lower()
+        if low == 'true':
+            parsed = True
+        elif low == 'false':
+            parsed = False
+        elif re.fullmatch(r'-?\d+', val):
+            parsed = int(val)
+        else:
+            parsed = val
+        frontmatter[key] = parsed
 
-    # Map paper_type to thresholds
-    thresholds = {
-        'NeurIPS': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 9, 'min_experiment_runs': 3},
-        'ICML': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
-        'ICLR': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
-        'AAAI': {'min_references': 25, 'min_figures': 4, 'min_tables': 1, 'abstract_max_words': 200, 'page_limit': 8, 'min_experiment_runs': 3},
-        'Journal': {'min_references': 40, 'min_figures': 5, 'min_tables': 2, 'abstract_max_words': 300, 'page_limit': 30, 'min_experiment_runs': 5},
-        'Short': {'min_references': 15, 'min_figures': 3, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 4, 'min_experiment_runs': 3},
-        'Letter': {'min_references': 10, 'min_figures': 2, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 2, 'min_experiment_runs': 3},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
+defaults = {
+    'paper_type': 'NeurIPS',
+    'domain': 'ai-exp',
+    'min_references': 30,
+    'min_figures': 5,
+    'min_tables': 1,
+    'page_limit': 9,
+    'abstract_max_words': 250,
+    'min_experiment_runs': 3,
+    'require_ablation': True,
+    'min_recent_refs_pct': 30,
+}
+for k, v in defaults.items():
+    if k not in frontmatter:
+        frontmatter[k] = v
 
-    import json
-    print(json.dumps({
-        'paper_type': pt,
-        'domain': frontmatter.get('domain', 'ai-exp'),
-        'min_references': t['min_references'],
-        'min_figures': t['min_figures'],
-        'min_tables': t['min_tables'],
-        'page_limit': t['page_limit'],
-        'abstract_max_words': t['abstract_max_words'],
-        'min_experiment_runs': t['min_experiment_runs'],
-        'require_ablation': frontmatter.get('require_ablation', True),
-        'min_recent_refs_pct': frontmatter.get('min_recent_refs_pct', 30),
-    }))
-else:
-    print(json.dumps({'error': 'no frontmatter'}))
-"
+# Map paper_type to thresholds
+thresholds = {
+    'NeurIPS': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 9, 'min_experiment_runs': 3},
+    'ICML': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
+    'ICLR': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
+    'AAAI': {'min_references': 25, 'min_figures': 4, 'min_tables': 1, 'abstract_max_words': 200, 'page_limit': 8, 'min_experiment_runs': 3},
+    'Journal': {'min_references': 40, 'min_figures': 5, 'min_tables': 2, 'abstract_max_words': 300, 'page_limit': 30, 'min_experiment_runs': 5},
+    'Short': {'min_references': 15, 'min_figures': 3, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 4, 'min_experiment_runs': 3},
+    'Letter': {'min_references': 10, 'min_figures': 2, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 2, 'min_experiment_runs': 3},
+}
+pt = str(frontmatter.get('paper_type', 'NeurIPS'))
+t = thresholds.get(pt, thresholds['NeurIPS'])
+
+print(json.dumps({
+    'paper_type': pt,
+    'domain': str(frontmatter.get('domain', 'ai-exp')),
+    'min_references': t['min_references'],
+    'min_figures': t['min_figures'],
+    'min_tables': t['min_tables'],
+    'page_limit': t['page_limit'],
+    'abstract_max_words': t['abstract_max_words'],
+    'min_experiment_runs': t['min_experiment_runs'],
+    'require_ablation': bool(frontmatter.get('require_ablation', True)),
+    'min_recent_refs_pct': int(frontmatter.get('min_recent_refs_pct', 30)),
+}))
+PYEOF
 }
 
 # Parse config once at start
@@ -98,7 +113,9 @@ count_bib_entries() {
         echo "0"
         return
     fi
-    grep -cE '^@[a-zA-Z]+\{' "$file" 2>/dev/null || echo "0"
+    local n
+    n=$(grep -cE '^@[a-zA-Z]+\{' "$file" 2>/dev/null || true)
+    echo "${n:-0}"
 }
 
 # Helper: Count recent refs (within 5 years)
@@ -132,7 +149,9 @@ count_figures() {
         echo "0"
         return
     fi
-    grep -cE '\\\\includegraphics' "$file" 2>/dev/null || echo "0"
+    local n
+    n=$(grep -cE '\\\\includegraphics' "$file" 2>/dev/null || true)
+    echo "${n:-0}"
 }
 
 # Helper: Count tables
@@ -142,7 +161,9 @@ count_tables() {
         echo "0"
         return
     fi
-    grep -cE '\\\\begin\{(tabular|table)' "$file" 2>/dev/null || echo "0"
+    local n
+    n=$(grep -cE '\\\\begin\{(tabular|table)' "$file" 2>/dev/null || true)
+    echo "${n:-0}"
 }
 
 # Helper: Check abstract word count
@@ -987,13 +1008,265 @@ pgrepo_eval() {
     echo '{"id":"PG-039","pass":'$pass',"evidence":"'$evidence'"}'
 }
 
+# PG-040: 运行时受限冒烟验证
+pg040_eval() {
+    local pass="false"
+    local evidence=""
+    local runtime_file=".paper/state/runtime-proof.json"
+
+    if [[ -f "$runtime_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$runtime_file') as f:
+        d = json.load(f)
+    req = ['command','timeout_sec','exit_code','timestamp','stdout_excerpt']
+    present = all(k in d and str(d.get(k,'')) != '' for k in req)
+    rc_ok = int(d.get('exit_code', 1)) == 0
+    print('true' if present and rc_ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="runtime-proof.json 证明受限冒烟运行成功"
+        else
+            pass="false"
+            evidence="runtime-proof.json 缺失字段或 exit_code 非 0"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/runtime-proof.json"
+    fi
+
+    echo '{"id":"PG-040","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-041: 外部审查证据固定 schema
+pg041_eval() {
+    local pass="false"
+    local evidence=""
+    local review_file=".paper/state/external-review-log.json"
+
+    if [[ -f "$review_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json
+req = ['provider','model','timestamp','verdict','raw_feedback','reviewer_role','request_id']
+try:
+    with open('$review_file') as f:
+        d = json.load(f)
+    fields_ok = all(k in d and str(d.get(k,'')) != '' for k in req)
+    verdict_ok = str(d.get('verdict','')).strip().lower() != 'blocking'
+    print('true' if fields_ok and verdict_ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="external-review-log.json schema 完整且 verdict 非 blocking"
+        else
+            pass="false"
+            evidence="external-review-log.json 缺失字段或 verdict=blocking"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/external-review-log.json"
+    fi
+
+    echo '{"id":"PG-041","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-042: 数值结果可追溯证据链
+pg042_eval() {
+    local pass="false"
+    local evidence=""
+    local trace_file=".paper/state/evidence-trace.json"
+
+    if [[ -f "$trace_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json, os
+try:
+    with open('$trace_file') as f:
+        claims = json.load(f).get('claims', [])
+    if not isinstance(claims, list) or len(claims) == 0:
+        print('false')
+    else:
+        good = True
+        for c in claims:
+            for k in ['claim_id','value','source_log','locator']:
+                if k not in c or str(c.get(k,'')) == '':
+                    good = False
+                    break
+            if not good:
+                break
+            p = str(c.get('source_log',''))
+            if not p.startswith('.paper/output/logs/'):
+                good = False
+                break
+            if not os.path.isfile(p) or os.path.getsize(p) == 0:
+                good = False
+                break
+        print('true' if good else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="evidence-trace 证据链完整且日志可访问"
+        else
+            pass="false"
+            evidence="evidence-trace 缺失映射字段或日志引用无效"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/evidence-trace.json"
+    fi
+
+    echo '{"id":"PG-042","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-043: 真实外部查重 API 达标
+pg043_eval() {
+    local pass="false"
+    local evidence=""
+    local plag_file=".paper/state/plagiarism-report.json"
+
+    if [[ -f "$plag_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$plag_file') as f:
+        d = json.load(f)
+    req = ['provider','report_id','checked_at','status','response_hash','similarity_pct']
+    present = all(k in d and str(d.get(k,'')) != '' for k in req)
+    status_ok = str(d.get('status','')).strip().lower() == 'success'
+    sim_ok = float(d.get('similarity_pct', 100.0)) <= 15.0
+    print('true' if present and status_ok and sim_ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="外部查重报告存在且 similarity_pct<=15"
+        else
+            pass="false"
+            evidence="外部查重报告缺失字段、调用失败或相似度超阈值"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/plagiarism-report.json"
+    fi
+
+    echo '{"id":"PG-043","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-044: 数据集版本与许可证合规
+pg044_eval() {
+    local pass="false"
+    local evidence=""
+    local inventory_file=".paper/state/dataset-inventory.json"
+
+    if [[ -f "$inventory_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$inventory_file') as f:
+        ds = json.load(f).get('datasets', [])
+    if not isinstance(ds, list) or len(ds) == 0:
+        print('false')
+    else:
+        good = True
+        for d in ds:
+            for k in ['name','source','license','usage_terms']:
+                if k not in d or str(d.get(k,'')) == '':
+                    good = False
+                    break
+            if not good:
+                break
+            has_version = str(d.get('version','')).strip() != ''
+            has_ref = str(d.get('doi','')).strip() != '' or str(d.get('url','')).strip() != ''
+            if not (has_version or has_ref):
+                good = False
+                break
+            if str(d.get('license_status','')).strip().lower() in ('prohibited','incompatible'):
+                good = False
+                break
+            if bool(d.get('restricted', False)) and str(d.get('compliance_note','')).strip() == '':
+                good = False
+                break
+        print('true' if good else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="dataset inventory 版本/许可证检查通过"
+        else
+            pass="false"
+            evidence="dataset inventory 缺失字段、版本引用不足或许可证冲突"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/dataset-inventory.json"
+    fi
+
+    echo '{"id":"PG-044","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-045: payload 协议 lint 通过
+pg045_eval() {
+    local pass="false"
+    local evidence=""
+    local lint_file=".paper/state/payload-lint-report.json"
+
+    if [[ -f "$lint_file" ]]; then
+        local ok
+        ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$lint_file') as f:
+        d = json.load(f)
+    status = str(d.get('status','')).strip().lower()
+    checks = d.get('checks', {})
+    required = ['triplet_complete','depends_valid','script_alignment']
+    checks_ok = all(bool(checks.get(k, False)) for k in required)
+    print('true' if status == 'pass' and checks_ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+        if [[ "$ok" == "true" ]]; then
+            pass="true"
+            evidence="payload lint 报告通过"
+        else
+            pass="false"
+            evidence="payload lint 报告未通过或字段不完整"
+        fi
+    else
+        pass="false"
+        evidence="缺少 .paper/state/payload-lint-report.json"
+    fi
+
+    echo '{"id":"PG-045","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
 main() {
     echo '{"results":['
 
     local first=true
     local result
 
-    for func in pggen001_eval pginit_eval pgpipe001_eval pg001_eval pg002_eval pg003_eval pg004_eval pg005_eval pg007_eval pg008_eval pg010_eval pg011_eval pg012_eval pg013_eval pg014_eval pg015_eval pg018_eval pg019_eval pg020_eval pg021_eval pg024_eval pg025_eval pg026_eval pg029_eval pg030_eval pg032_eval pg033_eval pgrepo_eval; do
+    for func in pggen001_eval pginit_eval pgpipe001_eval pg001_eval pg002_eval pg003_eval pg004_eval pg005_eval pg007_eval pg008_eval pg010_eval pg011_eval pg012_eval pg013_eval pg014_eval pg015_eval pg018_eval pg019_eval pg020_eval pg021_eval pg024_eval pg025_eval pg026_eval pg029_eval pg030_eval pg032_eval pg033_eval pgrepo_eval pg040_eval pg041_eval pg042_eval pg043_eval pg044_eval pg045_eval; do
         result=$("$func")
         if [[ "$first" == "true" ]]; then
             first=false
