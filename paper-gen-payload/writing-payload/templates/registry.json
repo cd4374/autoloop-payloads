@@ -1,0 +1,135 @@
+{
+  "templates": {
+    "neurips": {
+      "venues": ["NeurIPS", "neurips", "NeurIPS 2026"],
+      "entry_tex": "neurips/neurips_2026.tex",
+      "documentclass": "article",
+      "required_markers": ["\\usepackage{neurips_2026}"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 5,
+        "min_tables": 1,
+        "require_ablation": true
+      }
+    },
+    "icml": {
+      "venues": ["ICML", "icml"],
+      "entry_tex": "icml/example_paper.tex",
+      "documentclass": "article",
+      "required_markers": ["icml2025"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 8,
+        "min_references": 30,
+        "min_figures": 5,
+        "min_tables": 1,
+        "require_ablation": true
+      }
+    },
+    "iclr": {
+      "venues": ["ICLR", "iclr"],
+      "entry_tex": "iclr/iclr2025_conference.tex",
+      "documentclass": "article",
+      "required_markers": ["\\usepackage{iclr2025_conference"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 8,
+        "min_references": 30,
+        "min_figures": 5,
+        "min_tables": 1,
+        "require_ablation": true
+      }
+    },
+    "aaai": {
+      "venues": ["AAAI", "aaai", "AAAI 2026"],
+      "entry_tex": "aaai/anonymous-submission-latex-2026.tex",
+      "documentclass": "article",
+      "required_markers": ["aaai2026"],
+      "constraints": {
+        "abstract_max_words": 200,
+        "page_limit": 8,
+        "min_references": 25,
+        "min_figures": 4,
+        "min_tables": 1,
+        "require_ablation": true
+      }
+    },
+    "aps": {
+      "venues": ["APS", "PhysRev", "PRL", "PRA", "PRB", "PRC", "PRD", "PRE"],
+      "entry_tex": "aps/apstemplate.tex",
+      "documentclass": "revtex4-2",
+      "required_markers": ["aps,"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 4,
+        "min_tables": 1,
+        "require_ablation": false
+      }
+    },
+    "nature": {
+      "venues": ["Nature", "nature"],
+      "entry_tex": "nature/sn-article.tex",
+      "documentclass": "sn-jnl",
+      "required_markers": [],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 5,
+        "min_tables": 1,
+        "require_ablation": false
+      }
+    },
+    "science": {
+      "venues": ["Science", "science"],
+      "entry_tex": "science/science_template.tex",
+      "documentclass": "article",
+      "required_markers": ["\\usepackage{scicite}"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 5,
+        "min_tables": 1,
+        "require_ablation": false
+      }
+    },
+    "aip": {
+      "venues": ["AIP", "aip", "JAP", "JCP", "APL"],
+      "entry_tex": "aip/aiptemplate.tex",
+      "documentclass": "revtex4-1",
+      "required_markers": ["aip,"],
+      "constraints": {
+        "abstract_max_words": 250,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 4,
+        "min_tables": 1,
+        "require_ablation": false
+      }
+    },
+    "iop": {
+      "venues": ["IOP", "iop", "JPhys", "IOP Publishing"],
+      "entry_tex": "iop/iopjournal-template.tex",
+      "documentclass": "iopjournal",
+      "required_markers": ["\\documentclass{iopjournal}"],
+      "constraints": {
+        "abstract_max_words": 300,
+        "page_limit": 9,
+        "min_references": 30,
+        "min_figures": 4,
+        "min_tables": 1,
+        "require_ablation": false
+      }
+    }
+  },
+  "selection_defaults": {
+    "fallback_template_id": "neurips",
+    "source_priority": ["writing_venue", "paper_type.venue", "paper_type.paper_type", "fallback"],
+    "selection_rule": "Prefer explicit writing venue, then paper-type venue, then fallback"
+  }
+}

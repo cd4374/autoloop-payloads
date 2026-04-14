@@ -1,0 +1,17 @@
+# Autoloop runtime state — do NOT commit generated content
+.paper/output/
+.paper/input/
+
+# Legacy test directories (deprecated, kept empty for reference)
+citation-payload/.paper
+exp-payload/.paper
+figure-payload/.paper
+file-complete-payload/.paper
+idea-payload/.paper
+integrity-payload/.paper
+lit-payload/.paper
+paper-init-payload/.paper
+review-payload/.paper
+stat-payload/.paper
+writing-payload/.paper
+.paper_link
