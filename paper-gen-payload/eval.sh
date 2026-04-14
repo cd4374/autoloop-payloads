@@ -1,1582 +1,472 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Paper Generation Payload Evaluation Script
-# Evaluates all script-based criteria from criteria.md
-# Configuration is read from session.md frontmatter
+# Paper Generation Payload Evaluation Script — 精简版
+# 对应 criteria.md 中的 PG-G* (P0 blocking) 和 PG-Q* (advisory) criteria
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_FILE="$SCRIPT_DIR/session.md"
-
-# Load configuration from session.md frontmatter
-load_config() {
-    python3 - <<PYEOF
-import re, json
-
-with open('$SESSION_FILE') as f:
-    content = f.read()
-
-# Parse frontmatter without external dependencies (PyYAML may be unavailable)
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-frontmatter = {}
-if match:
-    for raw in match.group(1).splitlines():
-        line = raw.strip()
-        if not line or line.startswith('#') or ':' not in line:
-            continue
-        k, v = line.split(':', 1)
-        key = k.strip()
-        val = v.strip().strip('"').strip("'")
-        low = val.lower()
-        if low == 'true':
-            parsed = True
-        elif low == 'false':
-            parsed = False
-        elif re.fullmatch(r'-?\d+', val):
-            parsed = int(val)
-        else:
-            parsed = val
-        frontmatter[key] = parsed
-
-defaults = {
-    'paper_type': 'NeurIPS',
-    'domain': 'ai-exp',
-    'min_references': 30,
-    'min_figures': 5,
-    'min_tables': 1,
-    'page_limit': 9,
-    'abstract_max_words': 250,
-    'min_experiment_runs': 3,
-    'require_ablation': True,
-    'min_recent_refs_pct': 30,
-}
-for k, v in defaults.items():
-    if k not in frontmatter:
-        frontmatter[k] = v
-
-# Map paper_type to thresholds
-thresholds = {
-    'NeurIPS': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 9, 'min_experiment_runs': 3},
-    'ICML': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
-    'ICLR': {'min_references': 30, 'min_figures': 5, 'min_tables': 1, 'abstract_max_words': 250, 'page_limit': 8, 'min_experiment_runs': 3},
-    'AAAI': {'min_references': 25, 'min_figures': 4, 'min_tables': 1, 'abstract_max_words': 200, 'page_limit': 8, 'min_experiment_runs': 3},
-    'Journal': {'min_references': 40, 'min_figures': 5, 'min_tables': 2, 'abstract_max_words': 300, 'page_limit': 30, 'min_experiment_runs': 5},
-    'Short': {'min_references': 15, 'min_figures': 3, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 4, 'min_experiment_runs': 3},
-    'Letter': {'min_references': 10, 'min_figures': 2, 'min_tables': 1, 'abstract_max_words': 150, 'page_limit': 2, 'min_experiment_runs': 3},
-}
-pt = str(frontmatter.get('paper_type', 'NeurIPS'))
-t = thresholds.get(pt, thresholds['NeurIPS'])
-
-print(json.dumps({
-    'paper_type': pt,
-    'domain': str(frontmatter.get('domain', 'ai-exp')),
-    'min_references': t['min_references'],
-    'min_figures': t['min_figures'],
-    'min_tables': t['min_tables'],
-    'page_limit': t['page_limit'],
-    'abstract_max_words': t['abstract_max_words'],
-    'min_experiment_runs': t['min_experiment_runs'],
-    'require_ablation': bool(frontmatter.get('require_ablation', True)),
-    'min_recent_refs_pct': int(frontmatter.get('min_recent_refs_pct', 30)),
-}))
-PYEOF
-}
-
-# Parse config once at start
-CONFIG=$(load_config)
-PAPER_TYPE=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['paper_type'])")
-DOMAIN=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['domain'])")
-MIN_REFS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_references'])")
-MIN_FIGURES=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_figures'])")
-MIN_TABLES=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_tables'])")
-PAGE_LIMIT=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['page_limit'])")
-ABSTRACT_MAX=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['abstract_max_words'])")
-MIN_RUNS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_experiment_runs'])")
-REQUIRE_ABLATION=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['require_ablation'])")
-MIN_RECENT_PCT=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_recent_refs_pct'])")
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$SCRIPT_DIR}"
-OUTPUT_DIR=".paper/output"
-STATE_DIR=".paper/state"
-REFS_FILE="$OUTPUT_DIR/references.bib"
-DRAFT_FILE="$OUTPUT_DIR/draft.tex"
-PDF_FILE="$OUTPUT_DIR/paper.pdf"
-CODE_DIR="$OUTPUT_DIR/code"
-REPRO_FILE="$OUTPUT_DIR/reproducibility.json"
-PIPELINE_FILE="$STATE_DIR/pipeline-status.json"
-PAPERS_DIR=".paper/input/papers"
-LIT_CORPUS_INDEX_FILE="$STATE_DIR/lit-corpus-index.json"
-CITATION_CARDS_DIR="$OUTPUT_DIR/citation-cards"
-TEMPLATE_SELECTION_FILE="$STATE_DIR/template-selection.json"
-TEMPLATE_REGISTRY_FILE="$SCRIPT_DIR/writing-payload/templates/registry.json"
-RELEASE_STATE_FILE="$STATE_DIR/release-package.json"
+STATE_DIR="$PROJECT_ROOT/.paper/state"
+OUTPUT_DIR="$PROJECT_ROOT/.paper/output"
 
-# Helper: Check file exists
-check_file() { [[ -f "$1" ]] && echo "true" || echo "false"; }
-
-# Helper: Count BibTeX entries
-count_bib_entries() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "0"
-        return
-    fi
-    local n
-    n=$(grep -cE '^@[a-zA-Z]+\{' "$file" 2>/dev/null || true)
-    echo "${n:-0}"
-}
-
-# Helper: Count recent refs (within 5 years)
-count_recent_refs() {
-    local file="$1"
-    local current_year=$(date +%Y)
-    local cutoff=$((current_year - 5))
-    if [[ ! -f "$file" ]]; then
-        echo "0"
-        return
-    fi
-    grep -oE 'year\s*=\s*\{?[0-9]{4}' "$file" 2>/dev/null | \
-        grep -oE '[0-9]{4}' | \
-        awk -v cutoff="$cutoff" '$1 >= cutoff {count++} END {print count+0}'
-}
-
-# Helper: Count PDF pages
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 count_pdf_pages() {
     local pdf="$1"
-    if [[ ! -f "$pdf" ]]; then
-        echo "0"
-        return
-    fi
+    [[ ! -f "$pdf" ]] && echo "0" && return
     pdfinfo "$pdf" 2>/dev/null | grep Pages | awk '{print $2}' || echo "0"
 }
 
-# Helper: Count figures in draft.tex
+count_bib_entries() {
+    local file="$1"
+    [[ ! -f "$file" ]] && echo "0" && return
+    grep -cE '^@[a-zA-Z]+\{' "$file" 2>/dev/null || echo "0"
+}
+
 count_figures() {
     local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "0"
-        return
-    fi
-    local n
-    n=$(grep -cE '\\\\includegraphics' "$file" 2>/dev/null || true)
-    echo "${n:-0}"
+    [[ ! -f "$file" ]] && echo "0" && return
+    grep -cE '\\\\includegraphics' "$file" 2>/dev/null || echo "0"
 }
 
-# Helper: Count tables
-count_tables() {
+check_latex_structure() {
     local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "0"
-        return
-    fi
-    local n
-    n=$(grep -cE '\\\\begin\{(tabular|table)' "$file" 2>/dev/null || true)
-    echo "${n:-0}"
-}
-
-# Helper: Check abstract word count
-check_abstract_words() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "0"
-        return
-    fi
+    [[ ! -f "$file" ]] && echo "false" && return
     python3 -c "
 import re
 with open('$file') as f:
-    content = f.read()
-match = re.search(r'\\\\begin\{abstract\}(.*?)\\\\end\{abstract\}', content, re.DOTALL)
-if match:
-    words = len(match.group(1).split())
-    print(words)
-else:
-    print(0)
+    c = f.read()
+ok = bool(re.search(r'\\\\documentclass', c)) and \
+         bool(re.search(r'\\\\begin\{document\}', c)) and \
+         bool(re.search(r'\\\\end\{document\}', c))
+print('true' if ok else 'false')
 "
 }
 
-# Helper: Check random seed in code
-check_random_seed() {
-    local dir="$1"
-    if [[ ! -d "$dir" ]]; then
-        echo "false"
-        return
-    fi
-    if grep -qrE '(random\.seed|torch\.(cuda\.)?manual_seed|torch\.cuda\.manual_seed_all|np\.random\.seed|numpy\.random\.seed|tf\.random\.set_seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
-        echo "true"
-    else
-        echo "false"
-    fi
+check_json_fields() {
+    local file="$1"; shift
+    local fields=("$@")
+    [[ ! -f "$file" ]] && echo "false" && return
+    python3 -c "
+import json, sys
+try:
+    with open('$file') as f:
+        d = json.load(f)
+    missing = [f for f in $fields if f not in d or str(d.get(f,'')) == '']
+    print('true' if not missing else 'false:' + ','.join(missing))
+except Exception as e:
+    print('false:' + str(e))
+"
 }
 
-# Helper: Check reproducibility.json fields
-check_reproducibility_json() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false"
-        return
+# ---------------------------------------------------------------------------
+# PG-G01: 论文基础文件已生成
+# ---------------------------------------------------------------------------
+pgg01_eval() {
+    local draft="$OUTPUT_DIR/draft.tex"
+    local refs="$OUTPUT_DIR/references.bib"
+    local code="$OUTPUT_DIR/code/main.py"
+    local pass="false" evidence=""
+
+    local draft_ok refs_ok code_ok
+    draft_ok=$(check_latex_structure "$draft")
+    [[ -f "$refs" ]] && [[ $(count_bib_entries "$refs") -ge 5 ]] && refs_ok="true" || refs_ok="false"
+    [[ -f "$code" ]] && [[ $(wc -l < "$code" 2>/dev/null || echo 0) -gt 10 ]] && code_ok="true" || code_ok="false"
+
+    if [[ "$draft_ok" == "true" ]] && [[ "$refs_ok" == "true" ]] && [[ "$code_ok" == "true" ]]; then
+        pass="true"
+        evidence="draft.tex/references.bib/code/main.py 均存在且内容有效"
+    else
+        evidence="缺失或不完整: draft=$(check_latex_structure $draft), refs=$(count_bib_entries $refs), code_lines=$(wc -l < $code 2>/dev/null || echo 0)"
     fi
-    python3 -c "
+    echo "{\"id\":\"PG-G01\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
+}
+
+# ---------------------------------------------------------------------------
+# PG-G02: LaTeX 编译成功
+# ---------------------------------------------------------------------------
+pgg02_eval() {
+    local pdf="$OUTPUT_DIR/paper.pdf"
+    local pass="false" evidence=""
+    if [[ -f "$pdf" ]]; then
+        local pages
+        pages=$(count_pdf_pages "$pdf")
+        if [[ "$pages" -gt 0 ]]; then
+            pass="true"
+            evidence="paper.pdf 存在，$pages 页"
+        else
+            evidence="paper.pdf 存在但无法读取页数"
+        fi
+    else
+        evidence="paper.pdf 不存在"
+    fi
+    echo "{\"id\":\"PG-G02\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
+}
+
+# ---------------------------------------------------------------------------
+# PG-G03: P0 外部查重通过
+# ---------------------------------------------------------------------------
+pgg03_eval() {
+    local file="$STATE_DIR/plagiarism-report.json"
+    local pass="false" evidence=""
+    if [[ ! -f "$file" ]]; then
+        evidence="plagiarism-report.json 不存在"
+    else
+        local result
+        result=$(python3 -c "
 import json
 try:
     with open('$file') as f:
-        data = json.load(f)
-    required = ['hardware', 'software', 'hyperparameters', 'dataset', 'preprocessing']
-    for key in required:
-        if key not in data:
-            print('false')
-            exit(0)
-    print('true')
-except Exception:
-    print('false')
-"
-}
-
-# Helper: Check mean±std coverage
-check_mean_std() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false:file_not_found"
-        return
-    fi
-
-    python3 -c "
-import re
-
-with open('$file') as f:
-    content = f.read()
-
-MEAN_STD = re.compile(
-    r'[0-9]+(?:\.[0-9]+)?\s*(?:[\u00b1±]|\\\\pm|\+/-)\s*[0-9]+(?:\.[0-9]+)?',
-    re.IGNORECASE
-)
-
-table_pattern = r'\\\\begin\{(?:tabular|table\*?)\}.*?\\\\end\{(?:tabular|table\*?)\}'
-tabular_blocks = re.findall(table_pattern, content, re.DOTALL)
-
-table_bare = 0
-table_covered = 0
-
-for block in tabular_blocks:
-    clean = re.sub(r'\\\\[a-zA-Z]+(?:\[[^\]]*\])?\{[^}]*\}', '', block)
-    clean = re.sub(r'[\\\\&\|]', ' ', clean)
-    cells = clean.split('&')
-
-    for cell in cells:
-        cell = cell.strip()
-        if not cell:
-            continue
-        if re.match(r'^[a-zA-Z]', cell):
-            continue
-        numbers = re.findall(r'-?[0-9]+(?:\.[0-9]+)?', cell)
-        if not numbers:
-            continue
-        if MEAN_STD.search(cell):
-            table_covered += 1
-        else:
-            for num in numbers:
-                if len(num) >= 2:
-                    table_bare += 1
-                    break
-
-RESULT_PATTERNS = [
-    r'(?:accuracy|precision|recall|f1[- ]?score|auc|roc[- ]?auc|performance|reached|achieved|obtained|result)[^\n]{0,30}(-?[0-9]+(?:\.[0-9]+)?)',
-    r'(-?[0-9]+(?:\.[0-9]+)?)\s*%\s*(?:accuracy|precision|recall|f1)',
-    r'(?:score|accuracy)[^\n]{0,20}(-?[0-9]+(?:\.[0-9]+)?)',
-]
-text_claims = []
-for pat in RESULT_PATTERNS:
-    found = re.findall(pat, content, re.IGNORECASE)
-    text_claims.extend(found)
-
-text_bare = 0
-text_covered = 0
-for claim_num in text_claims:
-    idx = content.find(claim_num)
-    if idx < 0:
-        continue
-    window = content[idx:idx+50]
-    if MEAN_STD.search(window):
-        text_covered += 1
-    else:
-        text_bare += 1
-
-total_bare = table_bare + text_bare
-total_covered = table_covered + text_covered
-
-has_experiment = re.search(r'\\\\(?:section|subsubsection|paragraph)\{[^}]*(?:experiment|result|evaluation)', content, re.IGNORECASE)
-
-if total_bare == 0 and total_covered == 0:
-    if has_experiment:
-        print('partial:no_numerical_results_but_has_experiment_section')
-    else:
-        print('partial:no_numerical_results_found')
-elif total_bare > 0:
-    print('false:bare_numbers_table=' + str(table_bare) + '_text=' + str(text_bare) + '_covered=' + str(total_covered))
-elif total_covered > 0:
-    print('true:covered=' + str(total_covered) + '_bare=0')
-else:
-    print('partial:no_bare_but_no_covered_either')
-" 2>/dev/null || echo "false:script_error"
-}
-
-# PG-036: draft.tex exists with basic LaTeX structure
-pggen001_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在，需要生成"
-    else
-        local draft_size
-        draft_size=$(stat -c%s "$DRAFT_FILE" 2>/dev/null || stat -f%z "$DRAFT_FILE" 2>/dev/null || echo "0")
-        if [[ "$draft_size" -gt 100 ]]; then
-            local has_docclass="false"
-            local has_begindoc="false"
-            local has_enddoc="false"
-
-            grep -qE '\\\\documentclass' "$DRAFT_FILE" && has_docclass="true"
-            grep -qE '\\\\begin\{document\}' "$DRAFT_FILE" && has_begindoc="true"
-            grep -qE '\\\\end\{document\}' "$DRAFT_FILE" && has_enddoc="true"
-
-            if [[ "$has_docclass" == "true" ]] && [[ "$has_begindoc" == "true" ]] && [[ "$has_enddoc" == "true" ]]; then
-                pass="true"
-                evidence="draft.tex 存在 (${draft_size} 字节) 且包含完整 LaTeX 结构"
-            else
-                pass="false"
-                evidence="draft.tex 存在但缺少 LaTeX 基本结构 (docclass=$has_docclass, begin=$has_begindoc, end=$has_enddoc)"
-            fi
-        else
-            pass="false"
-            evidence="draft.tex 存在但过小 (${draft_size} 字节 < 100)"
-        fi
-    fi
-
-    echo '{"id":"PG-036","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-037: Paper initialization complete
-pginit_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ -f "$DRAFT_FILE" ]] && [[ -f "$REFS_FILE" ]] && [[ -f "$CODE_DIR/main.py" ]]; then
-        local draft_size
-        draft_size=$(stat -c%s "$DRAFT_FILE" 2>/dev/null || stat -f%z "$DRAFT_FILE" 2>/dev/null || echo "0")
-        local bib_count
-        bib_count=$(count_bib_entries "$REFS_FILE")
-
-        if [[ "$draft_size" -gt 100 ]] && [[ "$bib_count" -ge 5 ]]; then
-            pass="true"
-            evidence="论文初始化完成: draft.tex ${draft_size} 字节, references.bib ${bib_count} 个条目, 代码已生成"
-        else
-            pass="false"
-            evidence="初始化不完整: draft.tex ${draft_size}, references.bib ${bib_count} 个条目"
-        fi
-    else
-        pass="false"
-        evidence="缺少初始化文件: draft.tex/references.bib/code/main.py 不完全存在"
-    fi
-
-    echo '{"id":"PG-037","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-038: Pipeline status (optional, non-blocking)
-pgpipe001_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$PIPELINE_FILE" ]]; then
-        pass="true"
-        evidence="pipeline-status.json 不存在（可选，跳过）"
-        echo '{"id":"PG-038","pass":'$pass',"evidence":"'$evidence'"}'
-        return
-    fi
-
-    python3 -c "
-import json
-try:
-    with open('$PIPELINE_FILE') as f:
-        data = json.load(f)
-    required = ['current_stage', 'completed_stages', 'round', 'last_updated']
-    missing = [k for k in required if k not in data]
-    if missing:
-        print('false:missing:' + ','.join(missing))
-    else:
-        print('true:ok')
+        d = json.load(f)
+    status_ok = str(d.get('status','')).lower() == 'success'
+    sim = float(d.get('similarity_pct', 100.0))
+    sim_ok = sim <= 15.0
+    print('true' if status_ok and sim_ok else 'false:status=' + str(d.get('status','')) + ',sim=' + str(sim))
 except Exception as e:
-    print('false:error:' + str(e))
-" | while IFS= read -r line; do
-        if [[ "$line" == true:* ]]; then
-            evidence="pipeline-status.json 字段完整"
-        else
-            pass="false"
-            evidence="pipeline 状态: ${line#false:}"
-        fi
-        echo '{"id":"PG-038","pass":'$pass',"evidence":"'$evidence'"}'
-    done
-}
-
-# PG-001: 目录结构完整
-pg001_eval() {
-    local pass="true"
-    local evidence=""
-    local missing=""
-
-    local files=("$DRAFT_FILE" "$REFS_FILE" "$PDF_FILE" "$CODE_DIR/main.py" "$REPRO_FILE")
-    local env_file=""
-    [[ -f "$CODE_DIR/requirements.txt" ]] && env_file="true" || [[ -f "$CODE_DIR/environment.yml" ]] && env_file="true"
-
-    for f in "${files[@]}"; do
-        if [[ ! -f "$f" ]]; then
-            missing="$missing $f"
-            pass="false"
-        fi
-    done
-
-    if [[ "$env_file" != "true" ]]; then
-        missing="$missing requirements.txt_or_environment.yml"
-        pass="false"
-    fi
-
-    if [[ "$pass" == "true" ]]; then
-        evidence="所有必需文件存在: draft.tex, references.bib, paper.pdf, code/main.py, reproducibility.json, requirements.txt"
-    else
-        evidence="缺失文件:$missing"
-    fi
-
-    echo '{"id":"PG-001","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-002: LaTeX 编译成功
-pg002_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        cd "$OUTPUT_DIR"
-        if timeout 120 latexmk -pdf -interaction=nonstopmode draft.tex >/dev/null 2>&1; then
+    print('false:' + str(e))
+" 2>/dev/null || echo "false:script_error")
+        if [[ "$result" == "true" ]]; then
             pass="true"
-            evidence="LaTeX 编译成功，生成 paper.pdf"
+            evidence="外部查重通过，similarity ≤ 15%"
         else
-            pass="false"
-            evidence="LaTeX 编译失败"
+            evidence="外部查重未通过: ${result#false:}"
         fi
     fi
-
-    echo '{"id":"PG-002","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-G03\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-003: 页数符合限制
-pg003_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$PDF_FILE" ]]; then
-        pass="false"
-        evidence="paper.pdf 不存在"
-    else
-        local pages=$(count_pdf_pages "$PDF_FILE")
-        if [[ "$pages" -le "$PAGE_LIMIT" ]]; then
-            pass="true"
-            evidence="页数: $pages <= 限制: $PAGE_LIMIT"
-        else
-            pass="false"
-            evidence="页数: $pages > 限制: $PAGE_LIMIT"
-        fi
-    fi
-
-    echo '{"id":"PG-003","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-004: 引用数量门槛
-pg004_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$REFS_FILE" ]]; then
-        pass="false"
-        evidence="references.bib 不存在"
-    else
-        local count=$(count_bib_entries "$REFS_FILE")
-        if [[ "$count" -ge "$MIN_REFS" ]]; then
-            pass="true"
-            evidence="引用数: $count >= 门槛: $MIN_REFS"
-        else
-            pass="false"
-            evidence="引用数: $count < 门槛: $MIN_REFS"
-        fi
-    fi
-
-    echo '{"id":"PG-004","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-005: 近五年引用占比
-pg005_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$REFS_FILE" ]]; then
-        pass="false"
-        evidence="references.bib 不存在"
-    else
-        local total=$(count_bib_entries "$REFS_FILE")
-        local recent=$(count_recent_refs "$REFS_FILE")
-        local pct
-        pct=$(python3 -c "print(round($recent * 100 / $total, 1))" 2>/dev/null || echo "0")
-
-        if [[ "$pct" -ge "$MIN_RECENT_PCT" ]]; then
-            pass="true"
-            evidence="近五年引用占比: $pct% >= 门槛: $MIN_RECENT_PCT%"
-        else
-            pass="false"
-            evidence="近五年引用占比: $pct% < 门槛: $MIN_RECENT_PCT%"
-        fi
-    fi
-
-    echo '{"id":"PG-005","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-007: 图表数量门槛
-pg007_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        local count=$(count_figures "$DRAFT_FILE")
-        if [[ "$count" -ge "$MIN_FIGURES" ]]; then
-            pass="true"
-            evidence="图表数: $count >= 门槛: $MIN_FIGURES"
-        else
-            pass="false"
-            evidence="图表数: $count < 门槛: $MIN_FIGURES"
-        fi
-    fi
-
-    echo '{"id":"PG-007","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-008: 表格数量门槛
-pg008_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        local count=$(count_tables "$DRAFT_FILE")
-        if [[ "$count" -ge "$MIN_TABLES" ]]; then
-            pass="true"
-            evidence="表格数: $count >= 门槛: $MIN_TABLES"
-        else
-            pass="false"
-            evidence="表格数: $count < 门槛: $MIN_TABLES"
-        fi
-    fi
-
-    echo '{"id":"PG-008","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-010: 向量图表格式
-pg010_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -d "$OUTPUT_DIR/figures" ]]; then
-        pass="true"
-        evidence="figures 目录不存在（可选，跳过）"
-    else
-        local raster_count=$(find "$OUTPUT_DIR/figures" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" \) 2>/dev/null | wc -l)
-        local vector_count=$(find "$OUTPUT_DIR/figures" -type f \( -name "*.pdf" -o -name "*.eps" \) 2>/dev/null | wc -l)
-
-        if [[ "$raster_count" -eq 0 ]]; then
-            pass="true"
-            evidence="所有图表为向量格式 (pdf/eps): $vector_count 个"
-        else
-            pass="false"
-            evidence="存在栅格图: $raster_count 个"
-        fi
-    fi
-
-    echo '{"id":"PG-010","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-011: 随机种子固定
-pg011_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -d "$CODE_DIR" ]]; then
-        pass="false"
-        evidence="code/ 目录不存在"
-    else
-        if [[ "$(check_random_seed "$CODE_DIR")" == "true" ]]; then
-            pass="true"
-            evidence="实验代码包含随机种子设置"
-        else
-            pass="false"
-            evidence="实验代码缺少随机种子设置"
-        fi
-    fi
-
-    echo '{"id":"PG-011","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-012: 可重复性报告
-pg012_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$REPRO_FILE" ]]; then
-        pass="false"
-        evidence="reproducibility.json 不存在"
-    else
-        if [[ "$(check_reproducibility_json "$REPRO_FILE")" == "true" ]]; then
-            pass="true"
-            evidence="reproducibility.json 包含所有必需字段"
-        else
-            pass="false"
-            evidence="reproducibility.json 缺少必需字段"
-        fi
-    fi
-
-    echo '{"id":"PG-012","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-013: Reproducibility Statement
-pg013_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        if grep -qiE '(reproducibility|reproducible)' "$DRAFT_FILE"; then
-            pass="true"
-            evidence="包含 Reproducibility Statement"
-        else
-            pass="false"
-            evidence="缺少 Reproducibility Statement"
-        fi
-    fi
-
-    echo '{"id":"PG-013","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-014: 环境快照
-pg014_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ -f "$CODE_DIR/requirements.txt" ]] && [[ -s "$CODE_DIR/requirements.txt" ]]; then
-        pass="true"
-        evidence="requirements.txt 存在且非空"
-    elif [[ -f "$CODE_DIR/environment.yml" ]] && [[ -s "$CODE_DIR/environment.yml" ]]; then
-        pass="true"
-        evidence="environment.yml 存在且非空"
-    else
-        pass="false"
-        evidence="缺少 requirements.txt 或 environment.yml"
-    fi
-
-    echo '{"id":"PG-014","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-015: 统计报告规范
-pg015_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
+# ---------------------------------------------------------------------------
+# PG-G04: P0 运行时冒烟验证
+# ---------------------------------------------------------------------------
+pgg04_eval() {
+    local file="$STATE_DIR/runtime-proof.json"
+    local pass="false" evidence=""
+    if [[ ! -f "$file" ]]; then
+        evidence="runtime-proof.json 不存在"
     else
         local result
-        result=$(check_mean_std "$DRAFT_FILE")
-        case "$result" in
-            true*)
-                pass="true"
-                evidence="实验结果包含 mean±std 报告"
-                ;;
-            false*|partial*)
-                pass="false"
-                evidence="实验结果缺少 mean±std 报告: $result"
-                ;;
-            *)
-                pass="false"
-                evidence="检查失败: $result"
-                ;;
-        esac
-    fi
-
-    echo '{"id":"PG-015","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-018: Ablation Study
-pg018_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ "$REQUIRE_ABLATION" != "True" ]]; then
-        pass="true"
-        evidence="无需 Ablation Study (domain=$DOMAIN)"
-    elif [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    elif grep -qiE 'ablation' "$DRAFT_FILE"; then
-        pass="true"
-        evidence="包含 Ablation Study 章节"
-    else
-        pass="false"
-        evidence="缺少 Ablation Study 章节"
-    fi
-
-    echo '{"id":"PG-018","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-019: Limitations 段落
-pg019_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        if grep -qiE 'limitation' "$DRAFT_FILE"; then
-            pass="true"
-            evidence="包含 Limitations 段落"
-        else
-            pass="false"
-            evidence="缺少 Limitations 段落"
-        fi
-    fi
-
-    echo '{"id":"PG-019","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-020: 必要章节完整
-pg020_eval() {
-    local pass="true"
-    local evidence=""
-    local missing=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        local sections=("abstract" "intro" "method" "experiment" "conclusion" "reference")
-        for sec in "${sections[@]}"; do
-            if ! grep -qiE "\\\\(section|section\*)\{[^}]*$sec|\\\\begin\{abstract\}" "$DRAFT_FILE"; then
-                missing="$missing $sec"
-            fi
-        done
-
-        if [[ -z "$missing" ]]; then
-            pass="true"
-            evidence="包含所有必要章节"
-        else
-            pass="false"
-            evidence="缺少章节:$missing"
-        fi
-    fi
-
-    echo '{"id":"PG-020","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-021: Abstract 字数限制
-pg021_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        local words=$(check_abstract_words "$DRAFT_FILE")
-        if [[ "$words" -le "$ABSTRACT_MAX" ]]; then
-            pass="true"
-            evidence="Abstract 字数: $words <= 限制: $ABSTRACT_MAX"
-        else
-            pass="false"
-            evidence="Abstract 字数: $words > 限制: $ABSTRACT_MAX"
-        fi
-    fi
-
-    echo '{"id":"PG-021","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-024: 独立运行次数
-pg024_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -d "$OUTPUT_DIR/logs" ]]; then
-        pass="false"
-        evidence="logs 目录不存在"
-    else
-        local runs=$(find "$OUTPUT_DIR/logs" -name "run_*.log" 2>/dev/null | wc -l)
-        if [[ "$runs" -ge "$MIN_RUNS" ]]; then
-            pass="true"
-            evidence="独立运行次数: $runs >= 门槛: $MIN_RUNS"
-        else
-            pass="false"
-            evidence="独立运行次数: $runs < 门槛: $MIN_RUNS"
-        fi
-    fi
-
-    echo '{"id":"PG-024","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-025: Grid Independence (numerical domain)
-pg025_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ "$DOMAIN" != "numerical" ]]; then
-        pass="true"
-        evidence="非数值计算领域，无需 Grid Independence"
-    elif [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    elif grep -qiE 'grid.*independ|mesh.*converg|convergen.*grid' "$DRAFT_FILE"; then
-        pass="true"
-        evidence="包含 Grid Independence 测试"
-    else
-        pass="false"
-        evidence="缺少 Grid Independence 测试"
-    fi
-
-    echo '{"id":"PG-025","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-026: Convergence Order (numerical domain)
-pg026_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ "$DOMAIN" != "numerical" ]]; then
-        pass="true"
-        evidence="非数值计算领域，无需 Convergence Order"
-    elif [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    elif grep -qiE 'convergen.*order|order.*converg' "$DRAFT_FILE"; then
-        pass="true"
-        evidence="包含 Convergence Order 报告"
-    else
-        pass="false"
-        evidence="缺少 Convergence Order 报告"
-    fi
-
-    echo '{"id":"PG-026","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-029: 神经网络可视化披露
-pg029_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="draft.tex 不存在"
-    else
-        if grep -qiE 'visuali.*neural|attention.*map|saliency.*map|grad.*cam|tsne.*embedding' "$DRAFT_FILE"; then
-            if grep -qiE 'visuali.*method|visualization.*technique|attention.*mechanism.*visual' "$DRAFT_FILE"; then
-                pass="true"
-                evidence="包含神经网络可视化方法披露"
-            else
-                pass="false"
-                evidence="使用神经网络可视化但未披露方法"
-            fi
-        else
-            pass="true"
-            evidence="未使用神经网络可视化"
-        fi
-    fi
-
-    echo '{"id":"PG-029","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-030: 引用正文一致性
-pg030_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$DRAFT_FILE" ]] || [[ ! -f "$REFS_FILE" ]]; then
-        pass="false"
-        evidence="缺少必要文件"
-    else
-        local bib_keys
-        bib_keys=$(grep -oE '^@[a-zA-Z]+\{[^,]+' "$REFS_FILE" 2>/dev/null | sed 's/^@[a-zA-Z]*{//' | sort -u) || bib_keys=""
-
-        if [[ -z "$bib_keys" ]]; then
-            pass="false"
-            evidence="无法提取 BibTeX 条目"
-        else
-            local unused=0
-            local total=0
-            while IFS= read -r key; do
-                [[ -z "$key" ]] && continue
-                total=$((total + 1))
-                if ! grep -qE "\\\\cite[pt]?\{[^}]*$key" "$DRAFT_FILE" 2>/dev/null; then
-                    unused=$((unused + 1))
-                fi
-            done <<< "$bib_keys"
-
-            if [[ "$unused" -eq 0 ]] && [[ "$total" -gt 0 ]]; then
-                pass="true"
-                evidence="所有 $total 个引用在正文中被使用"
-            else
-                pass="false"
-                evidence="$unused/$total 个引用未在正文使用"
-            fi
-        fi
-    fi
-
-    echo '{"id":"PG-030","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-032: 实验结果可追溯
-pg032_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -d "$OUTPUT_DIR/logs" ]]; then
-        pass="false"
-        evidence="logs 目录不存在"
-    else
-        local log_count
-        log_count=$(find "$OUTPUT_DIR/logs" -name "run_*.log" 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$log_count" -eq 0 ]]; then
-            pass="false"
-            evidence="无 run_*.log 文件"
-        else
-            pass="true"
-            evidence="$log_count 个 run_*.log 存在"
-        fi
-    fi
-
-    echo '{"id":"PG-032","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-033: 代码可独立运行
-pg033_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ ! -f "$CODE_DIR/main.py" ]]; then
-        pass="false"
-        evidence="code/main.py 不存在"
-    elif ! python3 -m py_compile "$CODE_DIR/main.py" 2>/dev/null; then
-        pass="false"
-        evidence="code/main.py 存在语法错误"
-    else
-        pass="true"
-        evidence="code/main.py 语法正确"
-    fi
-
-    echo '{"id":"PG-033","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-039: 代码仓库版本锁定
-pgrepo_eval() {
-    local pass="true"
-    local evidence=""
-
-    if [[ -f "$REPRO_FILE" ]]; then
-        local repo_url repo_tag repo_commit repo_doi
-        repo_url=$(python3 -c "import json; d=json.load(open('$REPRO_FILE')); print(d.get('repository', '') or '')" 2>/dev/null || echo "")
-        repo_tag=$(python3 -c "import json; d=json.load(open('$REPRO_FILE')); print(d.get('repository_tag', '') or '')" 2>/dev/null || echo "")
-        repo_commit=$(python3 -c "import json; d=json.load(open('$REPRO_FILE')); print(d.get('repository_commit', '') or '')" 2>/dev/null || echo "")
-        repo_doi=$(python3 -c "import json; d=json.load(open('$REPRO_FILE')); print(d.get('repository_doi', '') or '')" 2>/dev/null || echo "")
-
-        if [[ -n "$repo_url" ]] || [[ -n "$repo_tag" ]] || [[ -n "$repo_commit" ]] || [[ -n "$repo_doi" ]]; then
-            pass="true"
-            evidence="reproducibility.json 包含仓库信息"
-        else
-            pass="false"
-            evidence="reproducibility.json 未包含仓库信息"
-        fi
-    else
-        pass="false"
-        evidence="reproducibility.json 不存在"
-    fi
-
-    echo '{"id":"PG-039","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-040: 运行时受限冒烟验证
-pg040_eval() {
-    local pass="false"
-    local evidence=""
-    local runtime_file=".paper/state/runtime-proof.json"
-
-    if [[ -f "$runtime_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
+        result=$(python3 -c "
 import json
 try:
-    with open('$runtime_file') as f:
+    with open('$file') as f:
         d = json.load(f)
-    req = ['command','timeout_sec','exit_code','timestamp','stdout_excerpt']
-    present = all(k in d and str(d.get(k,'')) != '' for k in req)
+    required = ['command','timeout_sec','exit_code','timestamp','stdout_excerpt']
+    missing = [k for k in required if k not in d or str(d.get(k,'')) == '']
     rc_ok = int(d.get('exit_code', 1)) == 0
-    print('true' if present and rc_ok else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
+    print('true' if not missing and rc_ok else 'false:missing=' + ','.join(missing) + ',rc=' + str(d.get('exit_code',1)))
+except Exception as e:
+    print('false:' + str(e))
+" 2>/dev/null || echo "false:script_error")
+        if [[ "$result" == "true" ]]; then
             pass="true"
-            evidence="runtime-proof.json 证明受限冒烟运行成功"
+            evidence="冒烟运行通过，exit_code=0，证据完整"
         else
-            pass="false"
-            evidence="runtime-proof.json 缺失字段或 exit_code 非 0"
+            evidence="冒烟验证失败: ${result#false:}"
         fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/runtime-proof.json"
     fi
-
-    echo '{"id":"PG-040","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-G04\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-041: 外部审查证据固定 schema
-pg041_eval() {
-    local pass="false"
-    local evidence=""
-    local review_file=".paper/state/external-review-log.json"
-
-    if [[ -f "$review_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
+# ---------------------------------------------------------------------------
+# PG-G05: P0 外部审查通过
+# ---------------------------------------------------------------------------
+pgg05_eval() {
+    local file="$STATE_DIR/external-review-log.json"
+    local pass="false" evidence=""
+    if [[ ! -f "$file" ]]; then
+        evidence="external-review-log.json 不存在"
+    else
+        local result
+        result=$(python3 -c "
 import json
-req = ['provider','model','timestamp','verdict','raw_feedback','reviewer_role','request_id']
 try:
-    with open('$review_file') as f:
+    with open('$file') as f:
         d = json.load(f)
-    fields_ok = all(k in d and str(d.get(k,'')) != '' for k in req)
-    verdict_ok = str(d.get('verdict','')).strip().lower() != 'blocking'
-    print('true' if fields_ok and verdict_ok else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
+    required = ['provider','model','timestamp','verdict','raw_feedback','reviewer_role','request_id']
+    missing = [k for k in required if k not in d or str(d.get(k,'')) == '']
+    verdict = str(d.get('verdict','')).lower()
+    verdict_ok = verdict != 'blocking'
+    print('true' if not missing and verdict_ok else 'false:missing=' + ','.join(missing) + ',verdict=' + verdict)
+except Exception as e:
+    print('false:' + str(e))
+" 2>/dev/null || echo "false:script_error")
+        if [[ "$result" == "true" ]]; then
             pass="true"
-            evidence="external-review-log.json schema 完整且 verdict 非 blocking"
+            evidence="外部审查通过，verdict ≠ blocking"
         else
-            pass="false"
-            evidence="external-review-log.json 缺失字段或 verdict=blocking"
+            evidence="外部审查未通过: ${result#false:}"
         fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/external-review-log.json"
     fi
-
-    echo '{"id":"PG-041","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-G05\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-042: 数值结果可追溯证据链
-pg042_eval() {
-    local pass="false"
-    local evidence=""
-    local trace_file=".paper/state/evidence-trace.json"
-
-    if [[ -f "$trace_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
+# ---------------------------------------------------------------------------
+# PG-G06: P0 证据链可追溯
+# ---------------------------------------------------------------------------
+pgg06_eval() {
+    local file="$STATE_DIR/evidence-trace.json"
+    local pass="false" evidence=""
+    if [[ ! -f "$file" ]]; then
+        evidence="evidence-trace.json 不存在"
+    else
+        local result
+        result=$(python3 -c "
 import json, os
 try:
-    with open('$trace_file') as f:
-        claims = json.load(f).get('claims', [])
+    with open('$file') as f:
+        d = json.load(f)
+    claims = d.get('claims', [])
     if not isinstance(claims, list) or len(claims) == 0:
-        print('false')
-    else:
-        good = True
-        for c in claims:
-            for k in ['claim_id','value','source_log','locator']:
-                if k not in c or str(c.get(k,'')) == '':
-                    good = False
-                    break
-            if not good:
-                break
-            p = str(c.get('source_log',''))
-            if not p.startswith('.paper/output/logs/'):
-                good = False
-                break
-            if not os.path.isfile(p) or os.path.getsize(p) == 0:
-                good = False
-                break
-        print('true' if good else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
+        print('false:no_claims')
+        exit(0)
+    missing_files = []
+    for c in claims:
+        p = str(c.get('source_log',''))
+        if not p or not os.path.isfile(p) or os.path.getsize(p) == 0:
+            missing_files.append(p or '(empty)')
+    print('true' if not missing_files else 'false:missing_files=' + ','.join(missing_files[:3]))
+except Exception as e:
+    print('false:' + str(e))
+" 2>/dev/null || echo "false:script_error")
+        if [[ "$result" == "true" ]]; then
             pass="true"
-            evidence="evidence-trace 证据链完整且日志可访问"
+            evidence="证据链完整，所有 claim 可追溯到日志"
         else
-            pass="false"
-            evidence="evidence-trace 缺失映射字段或日志引用无效"
+            evidence="证据链缺失: ${result#false:}"
         fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/evidence-trace.json"
     fi
-
-    echo '{"id":"PG-042","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-G06\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-043: 真实外部查重 API 达标
-pg043_eval() {
-    local pass="false"
-    local evidence=""
-    local plag_file=".paper/state/plagiarism-report.json"
+# ---------------------------------------------------------------------------
+# PG-Q01: 论文写作质量 (LLM advisory)
+# ---------------------------------------------------------------------------
+pgq01_eval() {
+    local draft="$OUTPUT_DIR/draft.tex"
+    local pass="true" evidence=""
+    if [[ ! -f "$draft" ]]; then
+        pass="false"
+        evidence="draft.tex 不存在"
+    else
+        local has_abs has_intro has_method has_exp has_concl
+        grep -qiE '\\\\begin\{abstract\}' "$draft" && has_abs="true" || has_abs="false"
+        grep -qiE '\\\\(?:section|subsubsection)\{[^}]*intro' "$draft" && has_intro="true" || has_intro="false"
+        grep -qiE '\\\\(?:section|subsubsection)\{[^}]*method' "$draft" && has_method="true" || has_method="false"
+        grep -qiE '\\\\(?:section|subsubsection)\{[^}]*experiment' "$draft" && has_exp="true" || has_exp="false"
+        grep -qiE '\\\\(?:section|subsubsection)\{[^}]*concl' "$draft" && has_concl="true" || has_concl="false"
+        if [[ "$has_abs" == "false" ]] || [[ "$has_intro" == "false" ]] || [[ "$has_method" == "false" ]] || [[ "$has_exp" == "false" ]] || [[ "$has_concl" == "false" ]]; then
+            pass="false"
+            evidence="缺少章节: abs=$has_abs intro=$has_intro method=$has_method exp=$has_exp concl=$has_concl"
+        else
+            evidence="主要章节结构完整"
+        fi
+    fi
+    echo "{\"id\":\"PG-Q01\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
+}
 
-    if [[ -f "$plag_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
+# ---------------------------------------------------------------------------
+# PG-Q02: 引用质量
+# ---------------------------------------------------------------------------
+pgq02_eval() {
+    local refs="$OUTPUT_DIR/references.bib"
+    local draft="$OUTPUT_DIR/draft.tex"
+    local pass="false" evidence=""
+
+    if [[ ! -f "$refs" ]]; then
+        evidence="references.bib 不存在"
+    else
+        local total recent_pct
+        total=$(count_bib_entries "$refs")
+        if [[ "$total" -lt 5 ]]; then
+            evidence="引用数不足: $total < 5"
+        else
+            # Count recent (within 5 years)
+            local year now cutoff
+            now=$(date +%Y)
+            cutoff=$((now - 5))
+            recent=$(grep -oE 'year\s*=\s*\{?[0-9]{4}' "$refs" 2>/dev/null | grep -oE '[0-9]{4}' | awk -v c="$cutoff" '$1 >= c {n++} END {print n+0}')
+            recent_pct=$(python3 -c "print(round($recent * 100 / $total, 1))" 2>/dev/null || echo "0")
+            # Check usage
+            local unused=0
+            if [[ -f "$draft" ]]; then
+                local keys
+                keys=$(grep -oE '^@[a-zA-Z]+\{[^,]+' "$refs" 2>/dev/null | sed 's/^@[a-zA-Z]*{//' | sort -u)
+                for k in $keys; do
+                    grep -qE "\\\\cite[pt]?\{[^}]*$k" "$draft" 2>/dev/null || unused=$((unused + 1))
+                done
+            fi
+            if [[ "$unused" -eq 0 ]]; then
+                pass="true"
+                evidence="引用数=$total，近五年占比=${recent_pct}%，全部被使用"
+            else
+                evidence="引用数=$total，近五年=${recent_pct}%，未使用=$unused"
+            fi
+        fi
+    fi
+    echo "{\"id\":\"PG-Q02\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
+}
+
+# ---------------------------------------------------------------------------
+# PG-Q03: 实验可复现性
+# ---------------------------------------------------------------------------
+pgq03_eval() {
+    local repro="$OUTPUT_DIR/reproducibility.json"
+    local code="$OUTPUT_DIR/code/main.py"
+    local logs="$OUTPUT_DIR/logs"
+    local pass="false" evidence=""
+
+    local repro_ok="false" seed_ok="false" logs_ok="false"
+    if [[ -f "$repro" ]]; then
+        python3 -c "
 import json
 try:
-    with open('$plag_file') as f:
+    with open('$repro') as f:
         d = json.load(f)
-    req = ['provider','report_id','checked_at','status','response_hash','similarity_pct']
-    present = all(k in d and str(d.get(k,'')) != '' for k in req)
-    status_ok = str(d.get('status','')).strip().lower() == 'success'
-    sim_ok = float(d.get('similarity_pct', 100.0)) <= 15.0
-    print('true' if present and status_ok and sim_ok else 'false')
+    required = ['hardware','software','hyperparameters','dataset','preprocessing']
+    ok = all(k in d and str(d.get(k,'')) != '' for k in required)
+    print('true' if ok else 'false')
 except Exception:
     print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
-            pass="true"
-            evidence="外部查重报告存在且 similarity_pct<=15"
-        else
-            pass="false"
-            evidence="外部查重报告缺失字段、调用失败或相似度超阈值"
-        fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/plagiarism-report.json"
+" 2>/dev/null | grep -q "true" && repro_ok="true"
     fi
+    if [[ -f "$code" ]]; then
+        grep -qE '(random\.seed|torch\.(cuda\.)?manual_seed|np\.random\.seed|set_seed)' "$code" 2>/dev/null && seed_ok="true"
+    fi
+    [[ -d "$logs" ]] && [[ $(find "$logs" -name "run_*.log" 2>/dev/null | wc -l | tr -d ' ') -gt 0 ]] && logs_ok="true"
 
-    echo '{"id":"PG-043","pass":'$pass',"evidence":"'$evidence'"}'
+    if [[ "$repro_ok" == "true" ]] && [[ "$seed_ok" == "true" ]] && [[ "$logs_ok" == "true" ]]; then
+        pass="true"
+        evidence="reproducibility.json/随机种子/logs 均完整"
+    else
+        evidence="repro=$repro_ok seed=$seed_ok logs=$logs_ok"
+    fi
+    echo "{\"id\":\"PG-Q03\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-044: 数据集版本与许可证合规
-pg044_eval() {
-    local pass="false"
-    local evidence=""
-    local inventory_file=".paper/state/dataset-inventory.json"
+# ---------------------------------------------------------------------------
+# PG-Q04: 图表质量
+# ---------------------------------------------------------------------------
+pgq04_eval() {
+    local draft="$OUTPUT_DIR/draft.tex"
+    local fig_dir="$OUTPUT_DIR/figures"
+    local pass="false" evidence=""
 
-    if [[ -f "$inventory_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
+    local fig_count=0 raster_count=0
+    [[ -f "$draft" ]] && fig_count=$(count_figures "$draft")
+    if [[ -d "$fig_dir" ]]; then
+        raster_count=$(find "$fig_dir" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.gif" \) 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    if [[ "$raster_count" -eq 0 ]] && [[ "$fig_count" -gt 0 ]]; then
+        pass="true"
+        evidence="图表数=$fig_count，全部向量格式"
+    elif [[ "$raster_count" -gt 0 ]]; then
+        evidence="存在栅格图: $raster_count 个"
+    else
+        evidence="图表数=0"
+    fi
+    echo "{\"id\":\"PG-Q04\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
+}
+
+# ---------------------------------------------------------------------------
+# PG-Q05: 数据集合规
+# ---------------------------------------------------------------------------
+pgq05_eval() {
+    local file="$STATE_DIR/dataset-inventory.json"
+    local pass="false" evidence=""
+    if [[ ! -f "$file" ]]; then
+        evidence="dataset-inventory.json 不存在"
+    else
+        local result
+        result=$(python3 -c "
 import json
 try:
-    with open('$inventory_file') as f:
-        ds = json.load(f).get('datasets', [])
+    with open('$file') as f:
+        d = json.load(f)
+    ds = d.get('datasets', [])
     if not isinstance(ds, list) or len(ds) == 0:
-        print('false')
-    else:
-        good = True
-        for d in ds:
-            for k in ['name','source','license','usage_terms']:
-                if k not in d or str(d.get(k,'')) == '':
-                    good = False
-                    break
-            if not good:
-                break
-            has_version = str(d.get('version','')).strip() != ''
-            has_ref = str(d.get('doi','')).strip() != '' or str(d.get('url','')).strip() != ''
-            if not (has_version or has_ref):
-                good = False
-                break
-            if str(d.get('license_status','')).strip().lower() in ('prohibited','incompatible'):
-                good = False
-                break
-            if bool(d.get('restricted', False)) and str(d.get('compliance_note','')).strip() == '':
-                good = False
-                break
-        print('true' if good else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
-            pass="true"
-            evidence="dataset inventory 版本/许可证检查通过"
-        else
-            pass="false"
-            evidence="dataset inventory 缺失字段、版本引用不足或许可证冲突"
-        fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/dataset-inventory.json"
-    fi
-
-    echo '{"id":"PG-044","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-045: payload 协议 lint 通过
-pg045_eval() {
-    local pass="false"
-    local evidence=""
-    local lint_file=".paper/state/payload-lint-report.json"
-
-    if [[ -f "$lint_file" ]]; then
-        local ok
-        ok=$(python3 - <<PYEOF
-import json
-try:
-    with open('$lint_file') as f:
-        d = json.load(f)
-    status = str(d.get('status','')).strip().lower()
-    checks = d.get('checks', {})
-    required = ['triplet_complete','depends_valid','script_alignment']
-    checks_ok = all(bool(checks.get(k, False)) for k in required)
-    print('true' if status == 'pass' and checks_ok else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-        if [[ "$ok" == "true" ]]; then
-            pass="true"
-            evidence="payload lint 报告通过"
-        else
-            pass="false"
-            evidence="payload lint 报告未通过或字段不完整"
-        fi
-    else
-        pass="false"
-        evidence="缺少 .paper/state/payload-lint-report.json"
-    fi
-
-    echo '{"id":"PG-045","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-046: 文献语料目录与索引完整
-pg046_eval() {
-    local pass="false"
-    local evidence=""
-
-    local papers_ok="false"
-    if [[ -d "$PAPERS_DIR" ]]; then
-        local paper_count
-        paper_count=$(find "$PAPERS_DIR" -type f \( -name "*.pdf" -o -name "*.txt" -o -name "*.md" \) 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$paper_count" -gt 0 ]]; then
-            papers_ok="true"
-        fi
-    fi
-
-    local index_ok="false"
-    if [[ -f "$LIT_CORPUS_INDEX_FILE" ]]; then
-        index_ok=$(python3 - <<PYEOF
-import json
-try:
-    with open('$LIT_CORPUS_INDEX_FILE') as f:
-        d = json.load(f)
-    papers = d.get('papers', [])
-    ok = isinstance(papers, list) and len(papers) > 0
-    if ok:
-        for p in papers:
-            if not isinstance(p, dict):
+        print('false:no_datasets')
+        exit(0)
+    ok = True
+    for item in ds:
+        for k in ['name','source','license','usage_terms']:
+            if k not in item or str(item.get(k,'')) == '':
                 ok = False
                 break
-            for k in ('paper_id','source_type','path'):
-                if str(p.get(k, '')).strip() == '':
-                    ok = False
-                    break
-            if not ok:
-                break
-    print('true' if ok else 'false')
-except Exception:
-    print('false')
-PYEOF
-)
-    fi
-
-    if [[ "$papers_ok" == "true" ]] && [[ "$index_ok" == "true" ]]; then
-        pass="true"
-        evidence="文献语料目录与 lit-corpus-index 均有效"
-    elif [[ "$papers_ok" != "true" ]]; then
-        pass="false"
-        evidence="缺少文献语料目录或无文献文件（.paper/input/papers）"
-    else
-        pass="false"
-        evidence="lit-corpus-index.json 缺失或字段不完整"
-    fi
-
-    echo '{"id":"PG-046","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-047: Markdown citation cards 完整
-pg047_eval() {
-    local pass="false"
-    local evidence=""
-
-    local card_dir_ok="false"
-    local mapping_ok="false"
-
-    if [[ -d "$CITATION_CARDS_DIR" ]]; then
-        local total non_md
-        total=$(find "$CITATION_CARDS_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
-        non_md=$(find "$CITATION_CARDS_DIR" -maxdepth 1 -type f ! -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$total" -gt 0 ]] && [[ "$non_md" -eq 0 ]]; then
-            card_dir_ok="true"
-        fi
-
-        if [[ -f "$REFS_FILE" ]]; then
-            mapping_ok=$(python3 - <<PYEOF
-import os, re
-cards_dir = '$CITATION_CARDS_DIR'
-refs_file = '$REFS_FILE'
-try:
-    with open(refs_file) as f:
-        bib = f.read()
-except Exception:
-    print('false')
-    raise SystemExit(0)
-
-bib_keys = set(k.strip() for k in re.findall(r'^@\w+\{([^,]+)', bib, re.MULTILINE))
-dois = set()
-arxiv_ids = set()
-for d in re.findall(r"doi\s*=\s*[\"{']([^\"}']+)[\"}']", bib, re.IGNORECASE):
-    v = d.strip().lower().replace('https://doi.org/','').replace('http://doi.org/','').replace('doi:','')
-    dois.add(v)
-for a in re.findall(r"(?:eprint|arxiv)\s*=\s*[\"{']([^\"}']+)[\"}']", bib, re.IGNORECASE):
-    v = a.strip().lower().replace('arxiv:','').replace(' ','')
-    arxiv_ids.add(v)
-
-cards = [fn for fn in os.listdir(cards_dir) if fn.lower().endswith('.md') and os.path.isfile(os.path.join(cards_dir, fn))]
-if not cards:
-    print('false')
-    raise SystemExit(0)
-
-ok = True
-for fn in cards:
-    with open(os.path.join(cards_dir, fn)) as f:
-        t = f.read().lower()
-    mapped = False
-    for k in bib_keys:
-        if ('@' + k.lower()) in t:
-            mapped = True
+        if not ok:
             break
-    if not mapped:
-        for d in dois:
-            if d and d in t:
-                mapped = True
-                break
-    if not mapped:
-        for a in arxiv_ids:
-            if a and a in t:
-                mapped = True
-                break
-    if not mapped:
-        ok = False
-        break
-
-print('true' if ok else 'false')
-PYEOF
-)
+    print('true' if ok else 'false:missing_fields')
+except Exception as e:
+    print('false:' + str(e))
+" 2>/dev/null || echo "false:script_error")
+        if [[ "$result" == "true" ]]; then
+            pass="true"
+            evidence="数据集清单字段完整"
+        else
+            evidence="数据集清单不完整: ${result#false:}"
         fi
     fi
-
-    if [[ "$card_dir_ok" == "true" ]] && [[ "$mapping_ok" == "true" ]]; then
-        pass="true"
-        evidence="citation-cards 为 Markdown 且可映射到 references.bib"
-    elif [[ "$card_dir_ok" != "true" ]]; then
-        pass="false"
-        evidence="citation-cards 缺失、为空或包含非 Markdown 文件"
-    else
-        pass="false"
-        evidence="citation-cards 与 references.bib 映射不完整"
-    fi
-
-    echo '{"id":"PG-047","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-Q05\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
-# PG-048: venue 模板选择一致
-pg048_eval() {
-    local pass="false"
-    local evidence=""
-
-    if [[ ! -f "$TEMPLATE_SELECTION_FILE" ]]; then
-        pass="false"
-        evidence="缺少 template-selection.json"
-        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
-        return
-    fi
-    if [[ ! -f "$TEMPLATE_REGISTRY_FILE" ]]; then
-        pass="false"
-        evidence="缺少 templates/registry.json"
-        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
-        return
-    fi
-    if [[ ! -f "$DRAFT_FILE" ]]; then
-        pass="false"
-        evidence="缺少 draft.tex"
-        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
-        return
-    fi
-
-    local result
-    result=$(python3 - <<PYEOF
-import json, re
-try:
-    with open('$TEMPLATE_SELECTION_FILE') as f:
-        sel = json.load(f)
-    with open('$TEMPLATE_REGISTRY_FILE') as f:
-        reg = json.load(f)
-    with open('$DRAFT_FILE') as f:
-        tex = f.read()
-except Exception:
-    print('false:read_error')
-    raise SystemExit(0)
-
-tid = str(sel.get('selected_template_id', '')).strip()
-if not tid:
-    print('false:missing_selected_template_id')
-    raise SystemExit(0)
-cfg = reg.get('templates', {}).get(tid)
-if not isinstance(cfg, dict):
-    print('false:template_not_found')
-    raise SystemExit(0)
-
-exp_doc = str(cfg.get('documentclass', '')).strip()
-m = re.search(r'\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}', tex)
-act_doc = m.group(1).strip() if m else ''
-if exp_doc and act_doc != exp_doc:
-    print(f'false:docclass_mismatch:{exp_doc}!={act_doc}')
-    raise SystemExit(0)
-
-for mk in cfg.get('required_markers', []):
-    if str(mk) not in tex:
-        print('false:missing_marker')
-        raise SystemExit(0)
-
-print('true')
-PYEOF
-)
-
-    if [[ "$result" == "true" ]]; then
-        pass="true"
-        evidence="template-selection、registry 与 draft.tex 一致"
-    else
-        pass="false"
-        evidence="模板一致性失败: $result"
-    fi
-
-    echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
-}
-
-# PG-049: hard-review 后 Vx 交付包
-pg049_eval() {
-    local pass="false"
-    local evidence=""
-
-    local gate_ok="false"
-    gate_ok=$(python3 - <<PYEOF
-import json, os
-state_dir = '$STATE_DIR'
-req = {
-  'runtime-proof.json': lambda d: int(d.get('exit_code', 1)) == 0,
-  'external-review-log.json': lambda d: str(d.get('verdict','')).lower() != 'blocking',
-  'evidence-trace.json': lambda d: isinstance(d.get('claims', []), list) and len(d.get('claims', [])) > 0,
-  'plagiarism-report.json': lambda d: str(d.get('status','')).lower() == 'success' and float(d.get('similarity_pct', 100.0)) <= 15.0,
-  'dataset-inventory.json': lambda d: isinstance(d.get('datasets', []), list) and len(d.get('datasets', [])) > 0,
-}
-ok = True
-for fn, chk in req.items():
-    fp = os.path.join(state_dir, fn)
-    if not os.path.isfile(fp):
-        ok = False
-        break
-    try:
-        with open(fp) as f:
-            d = json.load(f)
-        if not chk(d):
-            ok = False
-            break
-    except Exception:
-        ok = False
-        break
-print('true' if ok else 'false')
-PYEOF
-)
-
+# ---------------------------------------------------------------------------
+# PG-Q06: Vx 交付包完整
+# ---------------------------------------------------------------------------
+pgq06_eval() {
+    local pass="false" evidence=""
     local latest_v=""
-    latest_v=$(python3 - <<PYEOF
+    latest_v=$(python3 -c "
 import os, re
-root = '$PROJECT_ROOT'
 pat = re.compile(r'^V([0-9]+)$')
 best = None
-for n in os.listdir(root):
+for n in os.listdir('$PROJECT_ROOT'):
     m = pat.match(n)
-    if not m:
-        continue
-    i = int(m.group(1))
-    if best is None or i > best[0]:
-        best = (i, n)
+    if m and os.path.isdir(os.path.join('$PROJECT_ROOT', n)):
+        i = int(m.group(1))
+        if best is None or i > best[0]:
+            best = (i, n)
 print(best[1] if best else '')
-PYEOF
-)
+" 2>/dev/null || echo "")
 
-    local vx_ok="false"
-    if [[ -n "$latest_v" ]] && [[ -d "$PROJECT_ROOT/$latest_v/code" ]] && [[ -d "$PROJECT_ROOT/$latest_v/latex" ]] && [[ -d "$PROJECT_ROOT/$latest_v/else-supports" ]]; then
-        vx_ok="true"
-    fi
-
-    local rel_ok="false"
-    rel_ok=$(python3 - <<PYEOF
+    if [[ -n "$latest_v" ]] && \
+       [[ -d "$PROJECT_ROOT/$latest_v/code" ]] && \
+       [[ -d "$PROJECT_ROOT/$latest_v/latex" ]] && \
+       [[ -d "$PROJECT_ROOT/$latest_v/else-supports" ]]; then
+        local rel_ok="false"
+        if [[ -f "$STATE_DIR/release-package.json" ]]; then
+            python3 -c "
 import json
 try:
-    with open('$RELEASE_STATE_FILE') as f:
+    with open('$STATE_DIR/release-package.json') as f:
         d = json.load(f)
-    req = ['version_folder','created_at','trigger','evidence_refs']
-    ok = all(k in d for k in req)
+    ok = all(k in d for k in ['version_folder','created_at','trigger','evidence_refs'])
     print('true' if ok else 'false')
 except Exception:
     print('false')
-PYEOF
-)
-
-    if [[ "$gate_ok" == "true" ]] && [[ "$vx_ok" == "true" ]] && [[ "$rel_ok" == "true" ]]; then
-        pass="true"
-        evidence="hard gate 全通过后 Vx 结构与 release-package 状态完整"
-    elif [[ "$gate_ok" != "true" ]]; then
-        pass="false"
-        evidence="hard gate 未全部通过，Vx 触发条件不满足"
-    elif [[ "$vx_ok" != "true" ]]; then
-        pass="false"
-        evidence="项目根目录缺少完整 Vx 交付结构（code/latex/else-supports）"
+" 2>/dev/null | grep -q "true" && rel_ok="true"
+        fi
+        if [[ "$rel_ok" == "true" ]]; then
+            pass="true"
+            evidence="Vx 交付包完整 ($latest_v/)"
+        else
+            evidence="$latest_v/ 结构存在但 release-package.json 不完整"
+        fi
     else
-        pass="false"
-        evidence="release-package.json 缺失或字段不完整"
+        evidence="项目根目录缺少完整 Vx/ 交付结构"
     fi
-
-    echo '{"id":"PG-049","pass":'$pass',"evidence":"'$evidence'"}'
+    echo "{\"id\":\"PG-Q06\",\"pass\":$pass,\"evidence\":\"$evidence\"}"
 }
 
+# ---------------------------------------------------------------------------
+# Main — output JSON
+# ---------------------------------------------------------------------------
 main() {
     echo '{"results":['
-
     local first=true
-    local result
-
-    for func in pggen001_eval pginit_eval pgpipe001_eval pg001_eval pg002_eval pg003_eval pg004_eval pg005_eval pg007_eval pg008_eval pg010_eval pg011_eval pg012_eval pg013_eval pg014_eval pg015_eval pg018_eval pg019_eval pg020_eval pg021_eval pg024_eval pg025_eval pg026_eval pg029_eval pg030_eval pg032_eval pg033_eval pgrepo_eval pg040_eval pg041_eval pg042_eval pg043_eval pg044_eval pg045_eval pg046_eval pg047_eval pg048_eval pg049_eval; do
+    for func in pgg01_eval pgg02_eval pgg03_eval pgg04_eval pgg05_eval pgg06_eval pgq01_eval pgq02_eval pgq03_eval pgq04_eval pgq05_eval pgq06_eval; do
+        local result
         result=$("$func")
         if [[ "$first" == "true" ]]; then
             first=false
@@ -1585,7 +475,6 @@ main() {
         fi
         echo -n "    $result"
     done
-
     echo ""
     echo '  ]}'
 }

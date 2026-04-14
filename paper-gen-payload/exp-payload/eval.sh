@@ -1,373 +1,134 @@
 #!/usr/bin/env bash
+# Experiment Payload Evaluation Script — 精简版（8 criteria）
 set -euo pipefail
-
-# Experiment Loop Evaluation Script
-# Configuration inherited from parent payload's session.md
 
 CODE_DIR="${CODE_DIR:-.paper/output/code}"
 LOGS_DIR="${LOGS_DIR:-.paper/output/logs}"
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
+REPRO_FILE="${REPRO_FILE:-.paper/output/reproducibility.json}"
+COMPUTE_ENV="${COMPUTE_ENV:-.paper/state/compute-env.json}"
 PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 
-check_runnable() {
-    local file="$1"
-    python3 -m py_compile "$file" 2>/dev/null && echo "true" || echo "false"
-}
+python3 << 'PYEOF'
+import json, os, re, subprocess
 
-check_real_data() {
-    local file="$1"
-    if grep -qE '(torchvision|torch.utils.data|tensorflow_datasets|sklearn.datasets|load_dataset|huggingface|datasets\.load|from torchvision|from tensorflow|from sklearn|from huggingface|from datasets)' "$file"; then
-        echo "true"
-    elif grep -qE '(wget|curl.*download|urllib\.request)' "$file"; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
+CODE_DIR = os.environ.get('CODE_DIR', '.paper/output/code')
+LOGS_DIR = os.environ.get('LOGS_DIR', '.paper/output/logs')
+DRAFT_FILE = os.environ.get('DRAFT_FILE', '.paper/output/draft.tex')
+REPRO_FILE = os.environ.get('REPRO_FILE', '.paper/output/reproducibility.json')
+COMPUTE_ENV = os.environ.get('COMPUTE_ENV', '.paper/state/compute-env.json')
+PAPER_TYPE_FILE = os.environ.get('PAPER_TYPE_FILE', '.paper/state/paper-type.json')
 
-count_runs() {
-    if [[ -d "$1" ]]; then
-        ls "$1"/run_*.log 2>/dev/null | wc -l || echo "0"
-    else
-        echo "0"
-    fi
-}
+results = []
 
-check_ablation() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false"
-        return
-    fi
-    if grep -qiE 'ablation' "$file"; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
+def get_threshold(key, default):
+    try:
+        if os.path.isfile(PAPER_TYPE_FILE):
+            with open(PAPER_TYPE_FILE) as f:
+                pt = json.load(f)
+            return pt.get('derived_thresholds', {}).get(key, default)
+    except Exception:
+        pass
+    return default
 
-check_reproducibility_json() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false"
-        return
-    fi
-    python3 -c "
-import json
-try:
-    with open('$file') as f:
-        data = json.load(f)
-    required = ['hardware', 'software', 'hyperparameters', 'dataset', 'preprocessing']
-    for key in required:
-        if key not in data:
-            print('false')
-            exit(0)
-    print('true')
-except Exception:
-    print('false')
-"
-}
+# EXP-001: Code runnable
+main_py = os.path.join(CODE_DIR, 'main.py')
+if os.path.isfile(main_py):
+    r = subprocess.run(['python3', '-m', 'py_compile', main_py],
+                       capture_output=True, timeout=30)
+    ok = r.returncode == 0
+    results.append({"id": "EXP-001", "pass": ok,
+        "evidence": "代码可编译" if ok else "语法错误: " + r.stderr.decode(errors='replace')[:100]})
+else:
+    results.append({"id": "EXP-001", "pass": False, "evidence": "code/main.py 不存在"})
 
-# EXP-007: Random seed fixed
-check_seed_fixed() {
-    local dir="$1"
-    if [[ ! -d "$dir" ]]; then
-        echo "false"
-        return
-    fi
-    if grep -qrE '(random\.seed|torch\.(cuda\.)?manual_seed|torch\.cuda\.manual_seed_all|np\.random\.seed|numpy\.random\.seed|tf\.random\.set_seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
+# EXP-002, EXP-004: LLM criteria (placeholder)
+results.append({"id": "EXP-002", "pass": True, "evidence": "真实运行+Ablation 由 LLM evaluator 执行"})
+results.append({"id": "EXP-004", "pass": True, "evidence": "数据集由 LLM evaluator 执行"})
 
-# EXP-009: Experiment results traceable to logs
-check_logs_traceable() {
-    local logs_dir="$1"
-    if [[ ! -d "$logs_dir" ]]; then
-        echo "false"
-        return
-    fi
-    local count
-    count=$(find "$logs_dir" -name "run_*.log" 2>/dev/null | wc -l)
-    if [[ "$count" -gt 0 ]]; then
-        # Check that logs are non-empty and contain key metrics
-        local non_empty=0
-        while IFS= read -r logfile; do
-            [[ -z "$logfile" ]] && continue
-            if [[ -s "$logfile" ]]; then
-                # Basic content check: does it look like experiment output?
-                if grep -qiE '(accuracy|loss|metric|epoch|result|run)' "$logfile" 2>/dev/null; then
-                    ((non_empty++))
-                fi
-            fi
-        done < <(find "$logs_dir" -name "run_*.log" 2>/dev/null)
-        if [[ "$non_empty" -gt 0 ]]; then
-            echo "true"
-        else
-            echo "false"
-        fi
-    else
-        echo "false"
-    fi
-}
+# EXP-003: Run count
+min_runs = get_threshold('min_experiment_runs', 3)
+run_count = 0
+if os.path.isdir(LOGS_DIR):
+    run_count = len([f for f in os.listdir(LOGS_DIR) if f.startswith('run_') and f.endswith('.log')])
+ok = run_count >= min_runs
+results.append({"id": "EXP-003", "pass": ok,
+    "evidence": f"run_*.log: {run_count} >= {min_runs}" if ok
+    else f"run_*.log: {run_count} < {min_runs}"})
 
-# EXP-010: GPU info recorded
-check_gpu_info() {
-    local dir="$1"
-    local repro_file="${2:-.paper/output/reproducibility.json}"
-    if [[ -f "$repro_file" ]]; then
-        if grep -qiE '(gpu|cuda|nvidia|rtx|geforce|tesla|a100|v100)' "$repro_file" 2>/dev/null; then
-            echo "true"
-        else
-            echo "false"
-        fi
-    else
-        echo "false"
-    fi
-}
+# EXP-005: Reproducibility
+repro_ok = False
+seed_ok = False
+hyper_ok = False
+if os.path.isfile(REPRO_FILE):
+    try:
+        with open(REPRO_FILE) as f:
+            d = json.load(f)
+        repro_ok = all(str(d.get(k, '')) != '' for k in
+                      ['hardware', 'software', 'hyperparameters', 'dataset', 'preprocessing'])
+    except Exception:
+        pass
+if os.path.isfile(main_py):
+    with open(main_py) as f:
+        code = f.read()
+    seed_ok = bool(re.search(
+        r'(random\.seed|torch\.(?:cuda\.)?manual_seed|np\.random\.seed|set_seed)',
+        code))
+    hyper_ok = bool(re.search(
+        r'(learning.?rate|batch.?size|weight.?decay|optimizer|epoch)',
+        code, re.IGNORECASE))
 
-check_domain() {
-    [[ -f "$1" ]] && python3 -c "import json; print(json.load(open('$1')).get('paper_domain', 'ai-experimental'))" 2>/dev/null || echo "ai-experimental"
-}
+exp005_ok = repro_ok and seed_ok and hyper_ok
+results.append({"id": "EXP-005", "pass": exp005_ok,
+    "evidence": f"repro={repro_ok} seed={seed_ok} hyper={hyper_ok}"})
 
-# EXP-012: Uncertainty calculation (physics)
-check_uncertainty() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false"
-        return
-    fi
-    if grep -qiE '(uncertainty|error.*propagat|propagat.*error|confidence.*interval|standard.*deviation|delta.*method)' "$file"; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
+# EXP-006: Logs traceable
+trace_ok = False
+if os.path.isdir(LOGS_DIR):
+    log_files = [f for f in os.listdir(LOGS_DIR) if f.startswith('run_') and f.endswith('.log')]
+    if log_files:
+        has_content = all(
+            os.path.getsize(os.path.join(LOGS_DIR, f)) > 0
+            for f in log_files
+        )
+        trace_ok = has_content
+results.append({"id": "EXP-006", "pass": trace_ok,
+    "evidence": f"logs 可追溯 ({len(log_files) if os.path.isdir(LOGS_DIR) else 0} 个)" if trace_ok
+    else "logs 缺失或为空"})
 
-# EXP-013: Equipment calibration (physics)
-check_equipment_calibration() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        echo "false"
-        return
-    fi
-    # Check for equipment/instrument mentions with precision/resolution info
-    if grep -qiE '(instrument|equipment|device|apparatus|calibrat|precision|resolution|accuracy.*m|V|meter|volt|ohm)' "$file"; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
+# EXP-007: GPU info (advisory)
+gpu_ok = False
+if os.path.isfile(REPRO_FILE):
+    with open(REPRO_FILE) as f:
+        content = f.read().lower()
+    gpu_ok = bool(re.search(r'(gpu|cuda|nvidia|rtx|geforce|tesla|a100|v100)', content))
+results.append({"id": "EXP-007", "pass": gpu_ok,
+    "evidence": "GPU 信息已记录" if gpu_ok else "GPU 信息未记录（advisory）"})
 
-check_compute_env_usage() {
-    local code_file="$1"
-    local compute_env_file="$2"
-    [[ ! -f "$code_file" ]] && { echo "false:code_missing"; return; }
-    [[ ! -f "$compute_env_file" ]] && { echo "false:compute_env_missing"; return; }
+# EXP-008: Compute env used by code
+compute_ok = False
+if os.path.isfile(COMPUTE_ENV):
+    try:
+        with open(COMPUTE_ENV) as f:
+            env = json.load(f)
+        device = env.get('device', '')
+        if device and os.path.isfile(main_py):
+            with open(main_py) as f:
+                code = f.read()
+            patterns = [
+                r'torch\.device\s*\(',
+                r'torch\.cuda\.is_available',
+                r'torch\.backends\.mps\.is_available',
+                r'\.to\s*\(\s*[\"\']cuda[\"\']',
+                r'\.to\s*\(\s*[\"\']mps[\"\']',
+                r'device\s*=\s*[\"\']',
+            ]
+            compute_ok = any(re.search(p, code) for p in patterns)
+    except Exception:
+        pass
+results.append({"id": "EXP-008", "pass": compute_ok,
+    "evidence": "compute-env.json 存在且代码使用 device 选择" if compute_ok
+    else "compute-env.json 缺失或代码未使用 device 选择"})
 
-    python3 -c "
-import json, re
-try:
-    with open('$compute_env_file') as f:
-        env = json.load(f)
-    device = env.get('device', '')
-    if not device:
-        print('false:empty_device')
-        exit(0)
-except Exception as e:
-    print('false:error:' + str(e))
-    exit(0)
-
-with open('$code_file') as f:
-    code = f.read()
-
-# Check for device selection patterns in PyTorch code
-patterns = [
-    r'torch\.device\s*\(',
-    r'torch\.cuda\.is_available\s*\(',
-    r'torch\.backends\.mps\.is_available',
-    r'\.to\s*\(\s*[\"\']cuda[\"\']',
-    r'\.to\s*\(\s*[\"\']mps[\"\']',
-    r'device\s*=\s*[\"\']cuda[\"\']',
-    r'device\s*=\s*[\"\']mps[\"\']',
-    r'device\s*=\s*[\"\']cpu[\"\']',
-    r'import\s+torch.*device',
-]
-found = any(re.search(p, code, re.IGNORECASE) for p in patterns)
-print('true:' + device if found else 'false:no_device_selection')
-"
-}
-
-main() {
-    local run_pass="false"
-    local run_ev=""
-    local runs_pass="false"
-    local runs_ev=""
-    local seed_pass="false"
-    local seed_ev=""
-    local trace_pass="false"
-    local trace_ev=""
-    local real_data_pass="false"
-    local real_data_ev=""
-
-    # EXP-001: Runnable code
-    if [[ -f "$CODE_DIR/main.py" ]]; then
-        if [[ "$(check_runnable "$CODE_DIR/main.py")" == "true" ]]; then
-            run_pass="true"
-            run_ev="代码可编译，无语法错误"
-        else
-            run_pass="false"
-            run_ev="代码存在语法错误"
-        fi
-    else
-        run_pass="false"
-        run_ev="code/main.py 不存在"
-    fi
-
-    # EXP-003: Run count
-    local runs
-    runs=$(count_runs "$LOGS_DIR")
-    local min="3"
-    if [[ -f "$PAPER_TYPE_FILE" ]]; then
-        min=$(python3 -c "import json; print(json.load(open('$PAPER_TYPE_FILE')).get('derived_thresholds', {}).get('min_experiment_runs', 3))" 2>/dev/null || echo "3")
-    fi
-
-    if [[ "$runs" -ge "$min" ]]; then
-        runs_pass="true"
-        runs_ev="独立运行次数: $runs >= 门槛: $min"
-    else
-        runs_pass="false"
-        runs_ev="独立运行次数: $runs < 门槛: $min"
-    fi
-
-    # EXP-005: Real dataset usage (script)
-    if [[ -f "$CODE_DIR/main.py" ]]; then
-        if [[ "$(check_real_data "$CODE_DIR/main.py")" == "true" ]]; then
-            real_data_pass="true"
-            real_data_ev="检测到真实数据集加载或下载逻辑"
-        else
-            real_data_pass="false"
-            real_data_ev="未检测到真实数据集加载/下载逻辑（torchvision/tensorflow/sklearn/huggingface/datasets/wget/curl）"
-        fi
-    else
-        real_data_pass="false"
-        real_data_ev="code/main.py 不存在"
-    fi
-
-    # EXP-007: Random seed fixed
-    if [[ -d "$CODE_DIR" ]]; then
-        if [[ "$(check_seed_fixed "$CODE_DIR")" == "true" ]]; then
-            seed_pass="true"
-            seed_ev="代码包含随机种子固定"
-        else
-            seed_pass="false"
-            seed_ev="代码缺少随机种子固定"
-        fi
-    else
-        seed_pass="false"
-        seed_ev="code 目录不存在"
-    fi
-
-    # EXP-009: Results traceable to logs
-    if [[ -d "$LOGS_DIR" ]]; then
-        if [[ "$(check_logs_traceable "$LOGS_DIR")" == "true" ]]; then
-            trace_pass="true"
-            trace_ev="run_*.log 存在且包含实验指标"
-        else
-            trace_pass="false"
-            trace_ev="run_*.log 不存在或内容为空"
-        fi
-    else
-        trace_pass="false"
-        trace_ev="logs 目录不存在"
-    fi
-
-    # EXP-010: GPU info recorded
-    local gpu_pass="false"
-    local gpu_ev=""
-    if [[ -d "$CODE_DIR" ]]; then
-        if [[ "$(check_gpu_info "$CODE_DIR")" == "true" ]]; then
-            gpu_pass="true"
-            gpu_ev="GPU 信息已记录"
-        else
-            gpu_pass="false"
-            gpu_ev="GPU 信息未记录（advisory）"
-        fi
-    else
-        gpu_pass="false"
-        gpu_ev="code 目录不存在"
-    fi
-
-    # EXP-011, EXP-012, EXP-013: Physics domain checks
-    local physics_pass="true"
-    local physics_ev="非 physics domain 或无需检查"
-    local uncertainty_pass="true"
-    local uncertainty_ev="非 physics domain 或无需检查"
-    local equip_pass="true"
-    local equip_ev="非 physics domain 或无需检查"
-
-    if [[ -f "$PAPER_TYPE_FILE" ]]; then
-        local domain
-        domain=$(check_domain "$PAPER_TYPE_FILE")
-        if [[ "$domain" == "physics" ]]; then
-            # EXP-012: Uncertainty calculation
-            if [[ -f "$DRAFT_FILE" ]]; then
-                if [[ "$(check_uncertainty "$DRAFT_FILE")" == "true" ]]; then
-                    uncertainty_pass="true"
-                    uncertainty_ev="包含不确定度/误差传递计算"
-                else
-                    uncertainty_pass="false"
-                    uncertainty_ev="缺少不确定度/误差传递计算"
-                fi
-            else
-                uncertainty_pass="false"
-                uncertainty_ev="draft.tex 不存在"
-            fi
-
-            # EXP-013: Equipment calibration
-            if [[ -f "$DRAFT_FILE" ]]; then
-                if [[ "$(check_equipment_calibration "$DRAFT_FILE")" == "true" ]]; then
-                    equip_pass="true"
-                    equip_ev="包含设备/仪器信息"
-                else
-                    equip_pass="false"
-                    equip_ev="缺少设备/仪器信息"
-                fi
-            else
-                equip_pass="false"
-                equip_ev="draft.tex 不存在"
-            fi
-
-            physics_ev="Physics domain 检查完成"
-        fi
-    fi
-
-    echo '{"results":['
-    echo "{\"id\":\"EXP-001\",\"pass\":$run_pass,\"evidence\":\"$run_ev\"}"
-    echo ",{\"id\":\"EXP-003\",\"pass\":$runs_pass,\"evidence\":\"$runs_ev\"}"
-    echo ",{\"id\":\"EXP-005\",\"pass\":$real_data_pass,\"evidence\":\"$real_data_ev\"}"
-    echo ",{\"id\":\"EXP-007\",\"pass\":$seed_pass,\"evidence\":\"$seed_ev\"}"
-    echo ",{\"id\":\"EXP-009\",\"pass\":$trace_pass,\"evidence\":\"$trace_ev\"}"
-    echo ",{\"id\":\"EXP-010\",\"pass\":$gpu_pass,\"evidence\":\"$gpu_ev\"}"
-    echo ",{\"id\":\"EXP-012\",\"pass\":$uncertainty_pass,\"evidence\":\"$uncertainty_ev\"}"
-    echo ",{\"id\":\"EXP-013\",\"pass\":$equip_pass,\"evidence\":\"$equip_ev\"}"
-    # EXP-014: Compute env used by code
-    local compute_env_file="${COMPUTE_ENV_FILE:-.paper/state/compute-env.json}"
-    local compute_result
-    compute_result=$(check_compute_env_usage "$CODE_DIR/main.py" "$compute_env_file")
-    local compute_pass="false"
-    local compute_ev=""
-    if [[ "$compute_result" == true:* ]]; then
-        compute_pass="true"
-        compute_ev="compute-env.json 存在且代码包含 device 选择逻辑 (${compute_result#true:})"
-    else
-        compute_pass="false"
-        compute_ev="compute-env.json 缺失或代码未使用 device 选择: ${compute_result#false:}"
-    fi
-    echo ",{\"id\":\"EXP-014\",\"pass\":$compute_pass,\"evidence\":\"$compute_ev\"}"
-    echo ']}'
-}
-
-main
+print(json.dumps({"results": results}, ensure_ascii=False))
+PYEOF

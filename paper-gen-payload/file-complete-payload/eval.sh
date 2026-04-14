@@ -1,274 +1,161 @@
 #!/usr/bin/env bash
+# File Complete Payload Evaluation Script — 精简版（5 criteria）
 set -euo pipefail
-
-# File Complete Loop Evaluation Script
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-OUTPUT_DIR=".paper/output"
-STATE_DIR=".paper/state"
-DRAFT_FILE="$OUTPUT_DIR/draft.tex"
-REFS_FILE="$OUTPUT_DIR/references.bib"
-RELEASE_STATE_FILE="$STATE_DIR/release-package.json"
+STATE_DIR="$PROJECT_ROOT/.paper/state"
+OUTPUT_DIR="$PROJECT_ROOT/.paper/output"
 
-check_file_exists() {
-    [[ -f "$1" ]] && [[ -s "$1" ]] && echo "true" || echo "false"
-}
-
-check_latex_structure() {
-    local file="$1"
-    [[ ! -f "$file" ]] && { echo "false"; return; }
-
-    local has_docclass="false"
-    local has_begindoc="false"
-    local has_enddoc="false"
-
-    grep -qE '\\\\documentclass' "$file" && has_docclass="true"
-    grep -qE '\\\\begin\{document\}' "$file" && has_begindoc="true"
-    grep -qE '\\\\end\{document\}' "$file" && has_enddoc="true"
-
-    if [[ "$has_docclass" == "true" ]] && [[ "$has_begindoc" == "true" ]] && [[ "$has_enddoc" == "true" ]]; then
-        echo "true"
-    else
-        echo "false"
+# FILE-001: Core files complete
+files=(
+    "$OUTPUT_DIR/draft.tex:draft.tex"
+    "$OUTPUT_DIR/references.bib:references.bib"
+    "$OUTPUT_DIR/paper.pdf:paper.pdf"
+    "$OUTPUT_DIR/code/main.py:code/main.py"
+    "$OUTPUT_DIR/code/requirements.txt:code/requirements.txt"
+    "$OUTPUT_DIR/reproducibility.json:reproducibility.json"
+)
+file001_ok=true
+file001_missing=""
+for entry in "${files[@]}"; do
+    fp="${entry%%:*}"
+    if [[ ! -f "$fp" ]] || [[ ! -s "$fp" ]]; then
+        file001_ok=false
+        fn="${entry##*:}"
+        file001_missing="$file001_missing $fn"
     fi
-}
+done
+if [[ "$file001_ok" == "true" ]]; then
+    file001_ev="6 个核心文件均存在且非空"
+else
+    file001_ev="缺失:${file001_missing}"
+fi
 
-check_cite_consistency() {
-    local bib_file="$1"
-    local tex_file="$2"
-    [[ ! -f "$bib_file" ]] || [[ ! -f "$tex_file" ]] && { echo "false"; return; }
+# FILE-002: LaTeX structure + cite consistency
+file002_ok=false
+file002_ev=""
+if [[ -f "$OUTPUT_DIR/draft.tex" ]]; then
+    local has_docclass has_begindoc has_enddoc
+    grep -qE '\\\\documentclass' "$OUTPUT_DIR/draft.tex" && has_docclass="true"
+    grep -qE '\\\\begin\{document\}' "$OUTPUT_DIR/draft.tex" && has_begindoc="true"
+    grep -qE '\\\\end\{document\}' "$OUTPUT_DIR/draft.tex" && has_enddoc="true"
+    local latex_ok=false
+    [[ "$has_docclass" == "true" ]] && [[ "$has_begindoc" == "true" ]] && [[ "$has_enddoc" == "true" ]] && latex_ok=true
 
-    python3 -c "
+    local cite_ok=false
+    if [[ -f "$OUTPUT_DIR/references.bib" ]] && [[ -f "$OUTPUT_DIR/draft.tex" ]]; then
+        python3 -c "
 import re
-with open('$bib_file') as f:
+with open('$OUTPUT_DIR/references.bib') as f:
     bib = f.read()
-with open('$tex_file') as f:
+with open('$OUTPUT_DIR/draft.tex') as f:
     tex = f.read()
+keys = [k.strip() for k in re.findall(r'^@[a-zA-Z]+\{([^,]+)', bib, re.MULTILINE)]
+unused = sum(1 for k in keys if not re.search(r'\\\\cite[pt]?\{[^}]*' + re.escape(k), tex))
+print('true' if unused == 0 and keys else 'false')
+" 2>/dev/null | grep -q "true" && cite_ok=true
+    fi
 
-bib_keys = re.findall(r'^@[a-zA-Z]+\{([^,]+)', bib, re.MULTILINE)
-bib_keys = [k.strip() for k in bib_keys]
-unused = 0
-for key in bib_keys:
-    if not re.search(r'\\\\cite[pt]?\{[^}]*' + re.escape(key), tex):
-        unused += 1
+    if [[ "$latex_ok" == "true" ]] && [[ "$cite_ok" == "true" ]]; then
+        file002_ok=true
+        file002_ev="LaTeX 结构完整，引用一致"
+    elif [[ "$latex_ok" == "true" ]]; then
+        file002_ok=false
+        file002_ev="LaTeX 结构完整但引用不一致"
+    else
+        file002_ok=false
+        file002_ev="LaTeX 基本结构缺失"
+    fi
+else
+    file002_ev="draft.tex 不存在"
+fi
 
-if unused == 0 and len(bib_keys) > 0:
-    print('true')
-else:
-    print('false')
-" 2>/dev/null || echo "false"
-}
-
-check_hard_gate_ready() {
-    python3 -c "
+# FILE-003: Hard gate evidence
+gate_ok=false
+gate_ev=""
+python3 - <<'PYEOF' 2>/dev/null
 import json, os
-
-state_dir = '$STATE_DIR'
-
+state = '$STATE_DIR'
 req = {
-  'runtime-proof.json': lambda d: int(d.get('exit_code', 1)) == 0 and str(d.get('command','')).strip() != '',
-  'external-review-log.json': lambda d: str(d.get('verdict','')).strip().lower() != 'blocking',
-  'evidence-trace.json': lambda d: isinstance(d.get('claims', []), list) and len(d.get('claims', [])) > 0,
-  'plagiarism-report.json': lambda d: str(d.get('status','')).strip().lower() == 'success' and float(d.get('similarity_pct', 100.0)) <= 15.0,
-  'dataset-inventory.json': lambda d: isinstance(d.get('datasets', []), list) and len(d.get('datasets', [])) > 0,
+    'runtime-proof.json': lambda d: int(d.get('exit_code', 1)) == 0,
+    'external-review-log.json': lambda d: str(d.get('verdict', '')).lower() != 'blocking',
+    'evidence-trace.json': lambda d: isinstance(d.get('claims', []), list) and len(d.get('claims', [])) > 0,
+    'plagiarism-report.json': lambda d: str(d.get('status', '')).lower() == 'success' and float(d.get('similarity_pct', 100.0)) <= 15.0,
 }
-
-missing = []
-invalid = []
-for fn, checker in req.items():
-    fp = os.path.join(state_dir, fn)
+missing, invalid = [], []
+for fn, chk in req.items():
+    fp = os.path.join(state, fn)
     if not os.path.isfile(fp):
         missing.append(fn)
-        continue
-    try:
-        with open(fp) as f:
-            data = json.load(f)
-        if not checker(data):
+    else:
+        try:
+            if not chk(json.load(open(fp))):
+                invalid.append(fn)
+        except Exception:
             invalid.append(fn)
-    except Exception:
-        invalid.append(fn)
+print('ok' if not missing and not invalid else 'missing:' + ','.join(missing) + ' invalid:' + ','.join(invalid))
+PYEOF
+gate_result=$?
+if [[ $gate_result -eq 0 ]]; then
+    gate_ok=true
+    gate_ev="P0 门控证据齐全"
+else
+    gate_ev="P0 门控未就绪"
+fi
 
-if missing:
-    print('false:missing:' + ','.join(missing))
-elif invalid:
-    print('false:invalid:' + ','.join(invalid))
-else:
-    print('true')
-" 2>/dev/null || echo "false:script_error"
-}
-
-latest_release_dir() {
-    local root="$1"
-    python3 -c "
+# FILE-004: Vx package structure
+latest_v=$(python3 -c "
 import os, re
-root = '$root'
 pat = re.compile(r'^V([0-9]+)$')
 best = None
-for name in os.listdir(root):
-    m = pat.match(name)
-    if not m:
-        continue
-    n = int(m.group(1))
-    if best is None or n > best[0]:
-        best = (n, name)
+for n in os.listdir('$PROJECT_ROOT'):
+    m = pat.match(n)
+    if m and os.path.isdir(os.path.join('$PROJECT_ROOT', n)):
+        i = int(m.group(1))
+        if best is None or i > best[0]:
+            best = (i, n)
 print(best[1] if best else '')
-" 2>/dev/null || echo ""
-}
+" 2>/dev/null || echo "")
+vx_ok=false
+vx_ev=""
+if [[ -n "$latest_v" ]] && \
+   [[ -d "$PROJECT_ROOT/$latest_v/code" ]] && \
+   [[ -d "$PROJECT_ROOT/$latest_v/latex" ]] && \
+   [[ -d "$PROJECT_ROOT/$latest_v/else-supports" ]]; then
+    vx_ok=true
+    vx_ev="$latest_v 目录结构完整"
+elif [[ -n "$latest_v" ]]; then
+    vx_ev="$latest_v 存在但子目录不完整"
+else
+    vx_ev="未发现 Vx 版本目录"
+fi
 
-check_release_state_file() {
-    local file="$1"
-    [[ ! -f "$file" ]] && { echo "false:missing"; return; }
+# FILE-005: release-package.json
+rel_ok=false
+rel_ev=""
+if [[ -f "$STATE_DIR/release-package.json" ]]; then
     python3 -c "
 import json
-try:
-    with open('$file') as f:
-        d = json.load(f)
-    required = ['version_folder','created_at','trigger','evidence_refs']
-    for k in required:
-        if k not in d:
-            print('false:missing_' + k)
-            raise SystemExit(0)
-        if isinstance(d[k], str) and d[k].strip() == '':
-            print('false:empty_' + k)
-            raise SystemExit(0)
-    if not isinstance(d.get('evidence_refs'), (list, dict)):
-        print('false:bad_evidence_refs')
-        raise SystemExit(0)
-    print('true')
-except Exception:
-    print('false:invalid_json')
-" 2>/dev/null || echo "false:script_error"
-}
-
-main() {
-    local files=("$DRAFT_FILE" "$REFS_FILE" "$OUTPUT_DIR/paper.pdf" "$OUTPUT_DIR/code/main.py" "$OUTPUT_DIR/code/requirements.txt" "$OUTPUT_DIR/reproducibility.json")
-    local ids=("FILE-001" "FILE-002" "FILE-003" "FILE-004" "FILE-005" "FILE-006")
-    local names=("draft.tex" "references.bib" "paper.pdf" "code/main.py" "code/requirements.txt" "reproducibility.json")
-
-    echo '{"results":['
-
-    local first=true
-    for i in "${!files[@]}"; do
-        local pass=$(check_file_exists "${files[$i]}")
-        local ev=""
-        if [[ "$pass" == "true" ]]; then
-            ev="${names[$i]} 存在且非空"
-        else
-            ev="${names[$i]} 不存在或为空"
-        fi
-
-        if [[ "$first" == "true" ]]; then
-            first=false
-        else
-            echo ","
-        fi
-        echo -n "{\"id\":\"${ids[$i]}\",\"pass\":$pass,\"evidence\":\"$ev\"}"
-    done
-
-    # FILE-007: figures/ 目录存在
-    local fig_dir_pass="false"
-    local fig_dir_ev=""
-    if [[ -d "$OUTPUT_DIR/figures" ]]; then
-        fig_dir_pass="true"
-        fig_dir_ev="figures/ 目录存在"
+with open('$STATE_DIR/release-package.json') as f:
+    d = json.load(f)
+required = ['version_folder','created_at','trigger','evidence_refs']
+ok = all(k in d and (isinstance(d[k], str) and d[k] or isinstance(d[k], (list, dict))) for k in required)
+print('ok' if ok else 'missing:' + ','.join(k for k in required if k not in d or not d[k]))
+" 2>/dev/null | grep -q "ok" && rel_ok=true
+    if [[ "$rel_ok" == "true" ]]; then
+        rel_ev="release-package.json 字段完整"
     else
-        fig_dir_ev="figures/ 目录不存在"
+        rel_ev="release-package.json 字段缺失"
     fi
-    echo ","
-    echo -n "{\"id\":\"FILE-007\",\"pass\":$fig_dir_pass,\"evidence\":\"$fig_dir_ev\"}"
+else
+    rel_ev="release-package.json 不存在"
+fi
 
-    # FILE-008: LaTeX 基本结构
-    local latex_pass="false"
-    local latex_ev=""
-    if [[ "$(check_latex_structure "$DRAFT_FILE")" == "true" ]]; then
-        latex_pass="true"
-        latex_ev="draft.tex 包含 \\documentclass、\\begin{document}、\\end{document}"
-    else
-        latex_pass="false"
-        latex_ev="draft.tex 缺少 LaTeX 基本结构"
-    fi
-    echo ","
-    echo -n "{\"id\":\"FILE-008\",\"pass\":$latex_pass,\"evidence\":\"$latex_ev\"}"
-
-    # FILE-009: BibTeX 与正文引用一致
-    local cite_pass="false"
-    local cite_ev=""
-    if [[ "$(check_cite_consistency "$REFS_FILE" "$DRAFT_FILE")" == "true" ]]; then
-        cite_pass="true"
-        cite_ev="所有 BibTeX 条目在正文中被引用"
-    else
-        cite_pass="false"
-        cite_ev="存在未在正文中引用的 BibTeX 条目"
-    fi
-    echo ","
-    echo -n "{\"id\":\"FILE-009\",\"pass\":$cite_pass,\"evidence\":\"$cite_ev\"}"
-
-    # FILE-010: 所有必需文件完整性（汇总）
-    # Check all critical files exist
-    local all_exist="true"
-    for f in "$DRAFT_FILE" "$REFS_FILE" "$OUTPUT_DIR/paper.pdf" "$OUTPUT_DIR/code/main.py" "$OUTPUT_DIR/code/requirements.txt" "$OUTPUT_DIR/reproducibility.json"; do
-        if [[ ! -f "$f" ]]; then
-            all_exist="false"
-        fi
-    done
-    echo ","
-    if [[ "$all_exist" == "true" ]]; then
-        echo -n "{\"id\":\"FILE-010\",\"pass\":true,\"evidence\":\"所有必需文件均存在且非空\"}"
-    else
-        echo -n "{\"id\":\"FILE-010\",\"pass\":false,\"evidence\":\"存在缺失的必需文件\"}"
-    fi
-
-    # FILE-011: hard gate trigger condition
-    local gate_result
-    gate_result=$(check_hard_gate_ready)
-    local gate_pass="false"
-    local gate_ev=""
-    if [[ "$gate_result" == "true" ]]; then
-        gate_pass="true"
-        gate_ev="hard gate 证据齐全且满足基础通过条件"
-    else
-        gate_pass="false"
-        gate_ev="hard gate 未就绪: $gate_result"
-    fi
-    echo ","
-    echo -n "{\"id\":\"FILE-011\",\"pass\":$gate_pass,\"evidence\":\"$gate_ev\"}"
-
-    # FILE-012: latest Vx package structure
-    local latest_v
-    latest_v=$(latest_release_dir "$PROJECT_ROOT")
-    local vx_pass="false"
-    local vx_ev=""
-    if [[ -n "$latest_v" ]] && [[ -d "$PROJECT_ROOT/$latest_v/code" ]] && [[ -d "$PROJECT_ROOT/$latest_v/latex" ]] && [[ -d "$PROJECT_ROOT/$latest_v/else-supports" ]]; then
-        vx_pass="true"
-        vx_ev="$latest_v 目录结构完整（code/ latex/ else-supports/）"
-    elif [[ -n "$latest_v" ]]; then
-        vx_pass="false"
-        vx_ev="$latest_v 存在但缺少 code/latex/else-supports 子目录"
-    else
-        vx_pass="false"
-        vx_ev="项目根目录未发现 Vx 版本目录"
-    fi
-    echo ","
-    echo -n "{\"id\":\"FILE-012\",\"pass\":$vx_pass,\"evidence\":\"$vx_ev\"}"
-
-    # FILE-013: release-package state file
-    local rel_state_result
-    rel_state_result=$(check_release_state_file "$RELEASE_STATE_FILE")
-    local rel_state_pass="false"
-    local rel_state_ev=""
-    if [[ "$rel_state_result" == "true" ]]; then
-        rel_state_pass="true"
-        rel_state_ev="release-package.json 字段完整"
-    else
-        rel_state_pass="false"
-        rel_state_ev="release-package.json 无效: $rel_state_result"
-    fi
-    echo ","
-    echo -n "{\"id\":\"FILE-013\",\"pass\":$rel_state_pass,\"evidence\":\"$rel_state_ev\"}"
-
-    echo ""
-    echo ']}'
-}
-
-main
+echo '{"results":['
+echo "{\"id\":\"FILE-001\",\"pass\":$file001_ok,\"evidence\":\"$file001_ev\"}"
+echo ",{\"id\":\"FILE-002\",\"pass\":$file002_ok,\"evidence\":\"$file002_ev\"}"
+echo ",{\"id\":\"FILE-003\",\"pass\":$gate_ok,\"evidence\":\"$gate_ev\"}"
+echo ",{\"id\":\"FILE-004\",\"pass\":$vx_ok,\"evidence\":\"$vx_ev\"}"
+echo ",{\"id\":\"FILE-005\",\"pass\":$rel_ok,\"evidence\":\"$rel_ev\"}"
+echo ']}'

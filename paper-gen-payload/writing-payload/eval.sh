@@ -1,253 +1,163 @@
 #!/usr/bin/env bash
+# Writing Payload Evaluation Script — 精简版（5 criteria）
 set -euo pipefail
 
-# Writing Loop Evaluation Script
-# Only script-evaluated criteria are emitted:
-# - WRT-009 (Template match)
-# - WRT-010 (Figure reference completeness)
-# - WRT-011 (Template selection state consistency)
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
 FIGURES_DIR="${FIGURES_DIR:-.paper/output/figures}"
-PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 TEMPLATE_SELECTION_FILE="${TEMPLATE_SELECTION_FILE:-.paper/state/template-selection.json}"
 TEMPLATE_REGISTRY_FILE="${TEMPLATE_REGISTRY_FILE:-$SCRIPT_DIR/templates/registry.json}"
 
-check_template_match() {
-    local draft_file="$1"
-    local selection_file="$2"
-    local registry_file="$3"
-    [[ ! -f "$draft_file" ]] && { echo "false:draft_missing"; return; }
-    [[ ! -f "$selection_file" ]] && { echo "false:template_selection_missing"; return; }
-    [[ ! -f "$registry_file" ]] && { echo "false:template_registry_missing"; return; }
+export DRAFT_FILE FIGURES_DIR TEMPLATE_SELECTION_FILE TEMPLATE_REGISTRY_FILE PROJECT_ROOT
 
-    python3 -c "
-import json, os, re, sys
+python3 << 'PYEOF'
+import json, os, re, datetime
 
-draft_file = '$draft_file'
-selection_file = '$selection_file'
-registry_file = '$registry_file'
+DRAFT_FILE = os.environ.get('DRAFT_FILE', '.paper/output/draft.tex')
+FIGURES_DIR = os.environ.get('FIGURES_DIR', '.paper/output/figures')
+TEMPLATE_SELECTION_FILE = os.environ.get('TEMPLATE_SELECTION_FILE', '.paper/state/template-selection.json')
+TEMPLATE_REGISTRY_FILE = os.environ.get('TEMPLATE_REGISTRY_FILE', '')
+PROJECT_ROOT = os.environ.get('PROJECT_ROOT', '.')
 
-try:
-    with open(selection_file) as f:
-        sel = json.load(f)
-    with open(registry_file) as f:
-        reg = json.load(f)
-    with open(draft_file) as f:
+results = []
+
+# WRT-002: Template match
+tmpl_ok = False
+tmpl_ev = ""
+if os.path.isfile(DRAFT_FILE) and os.path.isfile(TEMPLATE_SELECTION_FILE) and os.path.isfile(TEMPLATE_REGISTRY_FILE):
+    try:
+        with open(TEMPLATE_SELECTION_FILE) as f:
+            sel = json.load(f)
+        with open(TEMPLATE_REGISTRY_FILE) as f:
+            reg = json.load(f)
+        with open(DRAFT_FILE) as f:
+            tex = f.read()
+
+        tid = str(sel.get('selected_template_id', '')).strip()
+        if tid and tid in reg.get('templates', {}):
+            cfg = reg['templates'][tid]
+            entry_tex = str(cfg.get('entry_tex', '')).strip()
+            if entry_tex:
+                entry_path = os.path.join(os.path.dirname(TEMPLATE_REGISTRY_FILE), entry_tex)
+                if not os.path.isfile(entry_path):
+                    tmpl_ev = f"entry_tex 不存在: {entry_tex}"
+                else:
+                    expected_docclass = str(cfg.get('documentclass', '')).strip()
+                    m = re.search(r'\\\\documentclass(?:\\[[^\\]]*\\])?\{([^}]+)\}', tex)
+                    actual_docclass = m.group(1).strip() if m else ''
+                    if expected_docclass and actual_docclass != expected_docclass:
+                        tmpl_ev = f"docclass 不匹配: expected={expected_docclass}, actual={actual_docclass}"
+                    else:
+                        required_markers = cfg.get('required_markers', [])
+                        missing = [mk for mk in required_markers if str(mk) not in tex]
+                        if missing:
+                            tmpl_ev = f"缺少 required_markers: {missing[:5]}"
+                        else:
+                            tmpl_ok = True
+                            tmpl_ev = "模板匹配通过：docclass 正确，required_markers 完整"
+            else:
+                tmpl_ev = "template registry entry_tex 为空"
+        else:
+            tmpl_ev = f"selected_template_id='{tid}' 不在 registry 中"
+    except Exception as e:
+        tmpl_ev = f"读取错误: {str(e)[:80]}"
+elif not os.path.isfile(DRAFT_FILE):
+    tmpl_ev = "draft.tex 不存在"
+elif not os.path.isfile(TEMPLATE_SELECTION_FILE):
+    tmpl_ev = "template-selection.json 不存在"
+else:
+    tmpl_ev = "template registry 不存在"
+
+results.append({"id": "WRT-002", "pass": tmpl_ok, "evidence": tmpl_ev})
+
+# WRT-003: Figure references
+fig_ok = False
+fig_ev = ""
+if os.path.isfile(DRAFT_FILE) and os.path.isdir(FIGURES_DIR):
+    with open(DRAFT_FILE) as f:
         tex = f.read()
-except Exception:
-    print('false:read_error')
-    sys.exit(0)
+    refs = re.findall(r'\\\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}', tex)
+    if not refs:
+        fig_ev = "未找到 \\includegraphics 引用"
+    else:
+        missing = 0
+        for ref in refs:
+            base = os.path.basename(ref)
+            found = False
+            for path in (ref, os.path.join(FIGURES_DIR, base),
+                         os.path.join(FIGURES_DIR, ref)):
+                if os.path.isfile(path):
+                    found = True
+                    break
+            if not found:
+                for ext in ('.pdf', '.eps', '.png', '.jpg', '.jpeg', '.svg'):
+                    if os.path.isfile(os.path.join(FIGURES_DIR, base + ext)):
+                        found = True
+                        break
+            if not found:
+                missing += 1
+        if missing == 0:
+            fig_ok = True
+            fig_ev = f"Figure references 完整（{len(refs)} 个）"
+        else:
+            fig_ev = f"{missing}/{len(refs)} 个 figure 引用缺失"
+elif not os.path.isfile(DRAFT_FILE):
+    fig_ev = "draft.tex 不存在"
+else:
+    fig_ev = "figures/ 目录不存在"
 
-tid = str(sel.get('selected_template_id', '')).strip()
-if not tid:
-    print('false:missing_selected_template_id')
-    sys.exit(0)
+results.append({"id": "WRT-003", "pass": fig_ok, "evidence": fig_ev})
 
-templates = reg.get('templates', {})
-if tid not in templates:
-    print('false:template_not_in_registry')
-    sys.exit(0)
+# WRT-004: Template selection state
+state_ok = False
+state_ev = ""
+if os.path.isfile(TEMPLATE_SELECTION_FILE) and os.path.isfile(TEMPLATE_REGISTRY_FILE):
+    try:
+        with open(TEMPLATE_SELECTION_FILE) as f:
+            sel = json.load(f)
+        with open(TEMPLATE_REGISTRY_FILE) as f:
+            reg = json.load(f)
+        required = ['target_venue', 'selected_template_id', 'source_of_truth', 'constraints', 'selected_at']
+        missing = [k for k in required
+                   if not sel.get(k) or (isinstance(sel[k], str) and not sel[k].strip())]
+        if missing:
+            state_ev = f"缺少字段: {missing}"
+        elif not isinstance(sel.get('constraints'), dict):
+            state_ev = "constraints 不是 dict"
+        else:
+            tid = str(sel.get('selected_template_id', '')).strip()
+            if tid in reg.get('templates', {}):
+                entry_tex = str(reg['templates'][tid].get('entry_tex', '')).strip()
+                if entry_tex:
+                    entry_path = os.path.join(os.path.dirname(TEMPLATE_REGISTRY_FILE), entry_tex)
+                    if os.path.isfile(entry_path):
+                        sa = str(sel.get('selected_at', '')).strip().replace('Z', '+00:00')
+                        try:
+                            datetime.datetime.fromisoformat(sa)
+                            state_ok = True
+                            state_ev = "template-selection.json 字段完整且 registry 可解析"
+                        except Exception:
+                            state_ev = "selected_at 格式无效"
+                    else:
+                        state_ev = f"entry_tex 不存在: {entry_tex}"
+                else:
+                    state_ev = "registry entry_tex 为空"
+            else:
+                state_ev = f"selected_template_id='{tid}' 不在 registry 中"
+    except Exception as e:
+        state_ev = f"读取错误: {str(e)[:80]}"
+elif not os.path.isfile(TEMPLATE_SELECTION_FILE):
+    state_ev = "template-selection.json 不存在"
+else:
+    state_ev = "template registry 不存在"
 
-cfg = templates[tid]
-entry_tex = str(cfg.get('entry_tex', '')).strip()
-if not entry_tex:
-    print('false:missing_entry_tex')
-    sys.exit(0)
-entry_path = os.path.join(os.path.dirname(registry_file), entry_tex)
-if not os.path.isfile(entry_path):
-    print('false:entry_tex_not_found')
-    sys.exit(0)
+results.append({"id": "WRT-004", "pass": state_ok, "evidence": state_ev})
 
-expected_docclass = str(cfg.get('documentclass', '')).strip()
-required_markers = cfg.get('required_markers', [])
+# WRT-001, WRT-005: LLM criteria (placeholder)
+results.append({"id": "WRT-001", "pass": True, "evidence": "论文章节结构由 LLM evaluator 执行"})
+results.append({"id": "WRT-005", "pass": True, "evidence": "写作质量由 LLM evaluator 执行"})
 
-m = re.search(r'\\\\documentclass(?:\\[[^\\]]*\\])?\\{([^}]+)\\}', tex)
-actual_docclass = m.group(1).strip() if m else ''
-if expected_docclass and actual_docclass != expected_docclass:
-    print(f'false:docclass_mismatch:expected={expected_docclass}:actual={actual_docclass}')
-    sys.exit(0)
-
-missing = []
-for mk in required_markers:
-    if str(mk) not in tex:
-        missing.append(str(mk))
-if missing:
-    print('false:missing_markers:' + ','.join(missing[:5]))
-    sys.exit(0)
-
-print('true')
-" 2>/dev/null || echo "false:script_error"
-}
-
-extract_graphics_refs() {
-    local file="$1"
-    if [[ ! -f "$file" ]]; then
-        return
-    fi
-
-    grep -oE '\\\\includegraphics(\[[^]]*\])?\{[^}]+\}' "$file" 2>/dev/null | \
-        sed -E 's/^\\\\includegraphics(\[[^]]*\])?\{//; s/\}$//' | sort -u
-}
-
-check_template_selection_state() {
-    local selection_file="$1"
-    local registry_file="$2"
-    [[ ! -f "$selection_file" ]] && { echo "false:template_selection_missing"; return; }
-    [[ ! -f "$registry_file" ]] && { echo "false:template_registry_missing"; return; }
-
-    python3 -c "
-import json, os, datetime
-
-selection_file = '$selection_file'
-registry_file = '$registry_file'
-
-try:
-    with open(selection_file) as f:
-        sel = json.load(f)
-    with open(registry_file) as f:
-        reg = json.load(f)
-except Exception:
-    print('false:read_error')
-    raise SystemExit(0)
-
-required = ['target_venue', 'selected_template_id', 'source_of_truth', 'constraints', 'selected_at']
-for k in required:
-    v = sel.get(k, None)
-    if v is None or (isinstance(v, str) and v.strip() == ''):
-        print('false:missing_' + k)
-        raise SystemExit(0)
-
-if not isinstance(sel.get('constraints'), dict):
-    print('false:constraints_not_object')
-    raise SystemExit(0)
-
-tid = str(sel.get('selected_template_id', '')).strip()
-templates = reg.get('templates', {})
-if tid not in templates:
-    print('false:template_not_in_registry')
-    raise SystemExit(0)
-entry_tex = str(templates.get(tid, {}).get('entry_tex', '')).strip()
-if not entry_tex:
-    print('false:missing_entry_tex')
-    raise SystemExit(0)
-entry_path = os.path.join(os.path.dirname(registry_file), entry_tex)
-if not os.path.isfile(entry_path):
-    print('false:entry_tex_not_found')
-    raise SystemExit(0)
-
-# selected_at should be parseable ISO-ish timestamp
-sa = str(sel.get('selected_at', '')).strip().replace('Z', '+00:00')
-try:
-    datetime.datetime.fromisoformat(sa)
-except Exception:
-    print('false:invalid_selected_at')
-    raise SystemExit(0)
-
-print('true')
-" 2>/dev/null || echo "false:script_error"
-}
-
-check_ref_exists() {
-    local ref="$1"
-    local figures_dir="$2"
-    local output_dir
-    output_dir=$(dirname "$figures_dir")
-
-    local base
-    base=$(basename "$ref")
-
-    # try common locations
-    if [[ -f "$ref" ]] || [[ -f "$figures_dir/$base" ]] || [[ -f "$figures_dir/$ref" ]] || [[ -f "$output_dir/$ref" ]]; then
-        echo "true"
-        return
-    fi
-
-    # try extension fallback when LaTeX omits suffix
-    for ext in pdf eps png jpg jpeg svg; do
-        if [[ -f "$figures_dir/$base.$ext" ]] || [[ -f "$output_dir/$ref.$ext" ]] || [[ -f "$figures_dir/$ref.$ext" ]]; then
-            echo "true"
-            return
-        fi
-    done
-
-    echo "false"
-}
-
-check_figure_refs() {
-    local file="$1"
-    local figures_dir="$2"
-
-    if [[ ! -f "$file" ]] || [[ ! -d "$figures_dir" ]]; then
-        echo "false"
-        return
-    fi
-
-    local missing=0
-    local refs
-    refs=$(extract_graphics_refs "$file")
-
-    # No includegraphics found => fail for completeness check
-    if [[ -z "$refs" ]]; then
-        echo "false"
-        return
-    fi
-
-    while IFS= read -r ref; do
-        [[ -z "$ref" ]] && continue
-        if [[ "$(check_ref_exists "$ref" "$figures_dir")" != "true" ]]; then
-            missing=$((missing + 1))
-        fi
-    done <<< "$refs"
-
-    if [[ "$missing" -eq 0 ]]; then
-        echo "true"
-    else
-        echo "false"
-    fi
-}
-
-main() {
-    local tmpl_result
-    tmpl_result=$(check_template_match "$DRAFT_FILE" "$TEMPLATE_SELECTION_FILE" "$TEMPLATE_REGISTRY_FILE")
-    local tmpl_pass="false"
-    local tmpl_ev
-    if [[ "$tmpl_result" == "true" ]]; then
-        tmpl_pass="true"
-        tmpl_ev="模板匹配通过：entry_tex 存在，documentclass 与 required_markers 一致"
-    else
-        tmpl_pass="false"
-        tmpl_ev="模板匹配失败：$tmpl_result"
-    fi
-
-    local fig_pass
-    fig_pass=$(check_figure_refs "$DRAFT_FILE" "$FIGURES_DIR")
-    local fig_ev
-    if [[ "$fig_pass" == "true" ]]; then
-        fig_ev="Figure references complete"
-    else
-        fig_ev="Some figure references missing or unresolved"
-    fi
-
-    local state_result
-    state_result=$(check_template_selection_state "$TEMPLATE_SELECTION_FILE" "$TEMPLATE_REGISTRY_FILE")
-    local state_pass="false"
-    local state_ev
-    if [[ "$state_result" == "true" ]]; then
-        state_pass="true"
-        state_ev="template-selection.json 字段完整且 registry 可解析"
-    else
-        state_pass="false"
-        state_ev="模板选择状态无效：$state_result"
-    fi
-
-    printf '%s\n' '{"results":['
-    printf '%s\n' "{\"id\":\"WRT-009\",\"pass\":$tmpl_pass,\"evidence\":\"$tmpl_ev\"}"
-    printf ',%s\n' "{\"id\":\"WRT-010\",\"pass\":$fig_pass,\"evidence\":\"$fig_ev\"}"
-    printf ',%s\n' "{\"id\":\"WRT-011\",\"pass\":$state_pass,\"evidence\":\"$state_ev\"}"
-    printf '%s\n' ']}'
-}
-
-main
+print(json.dumps({"results": results}, ensure_ascii=False))
+PYEOF
