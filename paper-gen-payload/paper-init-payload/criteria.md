@@ -70,9 +70,17 @@
   fix_hint: "创建 figures/ 目录"
 
 - id: INIT-010
+  title: 计算环境已检测并记录
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-001"]
+  pass_condition: ".paper/state/compute-env.json 存在且包含 device、available 字段，device 为 ssh_gpu/cuda/mps/cpu 之一"
+  fix_hint: "运行 scripts/compute-detect.sh 检测计算环境（SSH GPU → CUDA → MPS → CPU），将结果写入 .paper/state/compute-env.json。设置 COMPUTE_SSH_HOST/COMPUTE_SSH_KEY 环境变量以启用 SSH 远程 GPU。"
+
+- id: INIT-011
   title: 初始化完成
   severity: blocking
   evaluator: llm
-  depends_on: ["INIT-001", "INIT-002", "INIT-004", "INIT-005", "INIT-006", "INIT-007", "INIT-008", "INIT-009"]
+  depends_on: ["INIT-001", "INIT-002", "INIT-004", "INIT-005", "INIT-006", "INIT-007", "INIT-008", "INIT-009", "INIT-010"]
   pass_condition: "所有初始化检查通过，生成的内容语义连贯、与研究 idea 一致、格式正确，无明显的逻辑错误或占位符内容"
   fix_hint: "检查 draft.tex、references.bib、code/main.py 是否与研究 idea 一致，内容是否完整，修复不一致或缺失"

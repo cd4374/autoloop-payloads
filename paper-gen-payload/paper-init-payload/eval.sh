@@ -125,6 +125,31 @@ except Exception:
 "
 }
 
+check_compute_env_json() {
+    local file="$1"
+    [[ ! -f "$file" ]] && { echo "false:file_missing"; return; }
+
+    python3 -c "
+import json
+try:
+    with open('$file') as f:
+        data = json.load(f)
+    if 'device' not in data:
+        print('false:missing_device')
+        exit(0)
+    if 'available' not in data:
+        print('false:missing_available')
+        exit(0)
+    valid_devices = ['ssh_gpu', 'cuda', 'mps', 'cpu']
+    if data.get('device') not in valid_devices:
+        print('false:invalid_device:' + str(data.get('device')))
+        exit(0)
+    print('true:' + data.get('device',''))
+except Exception as e:
+    print('false:error:' + str(e))
+"
+}
+
 check_requirements() {
     local file="$1"
     [[ ! -f "$file" ]] && { echo "false"; return; }
@@ -267,6 +292,20 @@ main() {
         fig_ev="figures/ 目录不存在"
     fi
     results+=("{\"id\":\"INIT-009\",\"pass\":$fig_pass,\"evidence\":\"$fig_ev\"}")
+
+    # INIT-010: compute-env.json initialized
+    local compute_pass="false"
+    local compute_ev=""
+    local compute_result
+    compute_result=$(check_compute_env_json "$STATE_DIR/compute-env.json")
+    if [[ "$compute_result" == true:* ]]; then
+        compute_pass="true"
+        compute_ev="compute-env.json 已生成，设备: ${compute_result#true:}"
+    else
+        compute_pass="false"
+        compute_ev="compute-env.json 缺失或字段不完整: ${compute_result#false:}"
+    fi
+    results+=("{\"id\":\"INIT-010\",\"pass\":$compute_pass,\"evidence\":\"$compute_ev\"}")
 
     # Output JSON
     echo '{"results":['

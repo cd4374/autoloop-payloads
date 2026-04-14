@@ -161,6 +161,45 @@ check_equipment_calibration() {
     fi
 }
 
+check_compute_env_usage() {
+    local code_file="$1"
+    local compute_env_file="$2"
+    [[ ! -f "$code_file" ]] && { echo "false:code_missing"; return; }
+    [[ ! -f "$compute_env_file" ]] && { echo "false:compute_env_missing"; return; }
+
+    python3 -c "
+import json, re
+try:
+    with open('$compute_env_file') as f:
+        env = json.load(f)
+    device = env.get('device', '')
+    if not device:
+        print('false:empty_device')
+        exit(0)
+except Exception as e:
+    print('false:error:' + str(e))
+    exit(0)
+
+with open('$code_file') as f:
+    code = f.read()
+
+# Check for device selection patterns in PyTorch code
+patterns = [
+    r'torch\.device\s*\(',
+    r'torch\.cuda\.is_available\s*\(',
+    r'torch\.backends\.mps\.is_available',
+    r'\.to\s*\(\s*[\"\']cuda[\"\']',
+    r'\.to\s*\(\s*[\"\']mps[\"\']',
+    r'device\s*=\s*[\"\']cuda[\"\']',
+    r'device\s*=\s*[\"\']mps[\"\']',
+    r'device\s*=\s*[\"\']cpu[\"\']',
+    r'import\s+torch.*device',
+]
+found = any(re.search(p, code, re.IGNORECASE) for p in patterns)
+print('true:' + device if found else 'false:no_device_selection')
+"
+}
+
 main() {
     local run_pass="false"
     local run_ev=""
@@ -314,6 +353,20 @@ main() {
     echo ",{\"id\":\"EXP-010\",\"pass\":$gpu_pass,\"evidence\":\"$gpu_ev\"}"
     echo ",{\"id\":\"EXP-012\",\"pass\":$uncertainty_pass,\"evidence\":\"$uncertainty_ev\"}"
     echo ",{\"id\":\"EXP-013\",\"pass\":$equip_pass,\"evidence\":\"$equip_ev\"}"
+    # EXP-014: Compute env used by code
+    local compute_env_file="${COMPUTE_ENV_FILE:-.paper/state/compute-env.json}"
+    local compute_result
+    compute_result=$(check_compute_env_usage "$CODE_DIR/main.py" "$compute_env_file")
+    local compute_pass="false"
+    local compute_ev=""
+    if [[ "$compute_result" == true:* ]]; then
+        compute_pass="true"
+        compute_ev="compute-env.json 存在且代码包含 device 选择逻辑 (${compute_result#true:})"
+    else
+        compute_pass="false"
+        compute_ev="compute-env.json 缺失或代码未使用 device 选择: ${compute_result#false:}"
+    fi
+    echo ",{\"id\":\"EXP-014\",\"pass\":$compute_pass,\"evidence\":\"$compute_ev\"}"
     echo ']}'
 }
 

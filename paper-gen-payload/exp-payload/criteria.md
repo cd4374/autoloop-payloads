@@ -99,3 +99,11 @@
   depends_on: ["EXP-001"]
   pass_condition: "当 paper_domain=physics 时，论文列出主要实验设备的精度指标和校准状态。"
   fix_hint: "在 Experiments 章节添加设备说明：1) 测量仪器型号和精度；2) 校准方法和日期；3) 分辨率限制。"
+
+- id: EXP-014
+  title: 计算环境已初始化并被实验代码使用
+  severity: blocking
+  evaluator: script
+  depends_on: ["EXP-001"]
+  pass_condition: ".paper/state/compute-env.json 存在且实验代码 main.py 中包含 device 选择逻辑（torch.device/cuda.is_available/mps.is_available）。"
+  fix_hint: "确保 compute-detect.sh 已运行并生成 compute-env.json；实验代码根据 compute-env.json 中的 device 字段选择 torch.device('cuda') / torch.device('mps') / torch.device('cpu')。"

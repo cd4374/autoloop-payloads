@@ -1,6 +1,8 @@
 # Autoloop runtime state — do NOT commit generated content
 .paper/output/
 .paper/input/
+.paper/state/compute-env.json
+.paper/state/compute-config.json
 
 # Legacy test directories (deprecated, kept empty for reference)
 citation-payload/.paper

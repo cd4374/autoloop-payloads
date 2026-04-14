@@ -13,14 +13,15 @@ max_iter: 3
 
 ## 流程
 
-1. 检查目录结构完整性
-2. 检查 pipeline-status.json 已初始化
-3. **核心任务**：生成 draft.tex（包含完整章节内容）
-4. **核心任务**：生成 references.bib（至少 5 个真实引用）
-5. **核心任务**：生成实验代码 main.py
-6. 生成 requirements.txt
-7. 填写 reproducibility.json
-8. 创建 figures 目录
+1. **检测计算环境** — 运行 `scripts/compute-detect.sh`，生成 `.paper/state/compute-env.json`（SSH GPU → CUDA → MPS → CPU 优先级）
+2. 检查目录结构完整性
+3. 检查 pipeline-status.json 已初始化
+4. **核心任务**：生成 draft.tex（包含完整章节内容）
+5. **核心任务**：生成 references.bib（至少 5 个真实引用）
+6. **核心任务**：生成实验代码 main.py
+7. 生成 requirements.txt
+8. 填写 reproducibility.json
+9. 创建 figures 目录
 
 ## 配置继承
 
