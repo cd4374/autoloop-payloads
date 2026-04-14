@@ -29,8 +29,8 @@ rules:
     pass_condition: "draft.tex 中的 \\includegraphics 引用在 figures/ 目录下对应真实文件。"
     fix_hint: "补充缺失图表或修正引用路径。"
     check:
-      type: files_exist
-      files:
+      type: dir_structure
+      dirs:
         - .paper/output/figures
 
   - id: WRT-004

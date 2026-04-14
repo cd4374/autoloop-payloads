@@ -8,9 +8,9 @@ max_iter: 2
 
 ## 检查项目
 
-1. 每个 payload 目录包含 criteria.md/eval.sh/session.md
+1. 每个 payload 目录包含 criteria.yaml/session.md
 2. ID 格式、唯一性、depends_on 引用与无环
-3. script criteria 与 eval 输出 ID 集合一致
+3. criteria.yaml 中 script rules 的 check.type 已在 loop-run SKILL.md 注册
 
 ## 状态输出
 

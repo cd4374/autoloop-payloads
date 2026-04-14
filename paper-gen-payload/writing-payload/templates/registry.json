@@ -18,7 +18,7 @@
       "venues": ["ICML", "icml"],
       "entry_tex": "icml/example_paper.tex",
       "documentclass": "article",
-      "required_markers": ["icml2025"],
+      "required_markers": ["icml2026"],
       "constraints": {
         "abstract_max_words": 250,
         "page_limit": 8,
@@ -30,9 +30,9 @@
     },
     "iclr": {
       "venues": ["ICLR", "iclr"],
-      "entry_tex": "iclr/iclr2025_conference.tex",
+      "entry_tex": "iclr/iclr2026_conference.tex",
       "documentclass": "article",
-      "required_markers": ["\\usepackage{iclr2025_conference"],
+      "required_markers": ["\\usepackage{iclr2026_conference"],
       "constraints": {
         "abstract_max_words": 250,
         "page_limit": 8,

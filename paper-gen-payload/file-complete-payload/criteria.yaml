@@ -79,6 +79,10 @@ rules:
     check:
       type: vx_package
       project_root: .
+      subdirs:
+        - code
+        - latex
+        - else-supports
 
   - id: FILE-005
     title: release-package 状态文件完整

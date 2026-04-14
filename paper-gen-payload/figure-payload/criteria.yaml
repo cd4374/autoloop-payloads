@@ -23,8 +23,8 @@ rules:
       type: regex_all
       file: .paper/output/draft.tex
       patterns:
-        - '\\\\includegraphics.*\.pdf'
-        - '\\\\includegraphics.*\.eps'
+        - '\\\\includegraphics.*\\.pdf'
+        - '\\\\includegraphics.*\\.eps'
 
   - id: FIG-003
     title: 图表引用与文件一致
@@ -46,8 +46,8 @@ rules:
     pass_condition: "所有栅格图 (PNG/JPG) DPI >= 300。"
     fix_hint: "使用高分辨率图像（>=300 DPI），或用矢量格式替代。"
     check:
-      type: files_exist
-      files:
+      type: dir_structure
+      dirs:
         - .paper/output/figures
 
   - id: FIG-005
