@@ -1,0 +1,47 @@
+rules:
+- id: INIT-001
+  title: 顶级目录结构完整
+  severity: blocking
+  evaluator: script
+  pass_condition: ".paper/ 目录存在且包含 state/、input/、output/ 子目录；.paper/input/idea.md 存在且非空。"
+  fix_hint: "创建目录结构：mkdir -p .paper/state .paper/input .paper/output；创建 idea.md 描述研究想法。"
+
+- id: INIT-002
+  title: paper-type.json 已初始化
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-001"]
+  pass_condition: ".paper/state/paper-type.json 存在且包含 venue、paper_domain、derived_thresholds（非空 dict）。"
+  fix_hint: "创建 paper-type.json，从父 payload session.md 读取配置，计算 derived_thresholds（min_references/min_figures/page_limit/abstract_max_words/min_experiment_runs/require_ablation/min_recent_refs_pct）。"
+
+- id: INIT-003
+  title: draft.tex 已生成
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-002"]
+  pass_condition: ".paper/output/draft.tex 存在且包含 \\documentclass、\\begin{document}、\\end{document} 结构。"
+  fix_hint: "根据 idea.md 和 paper-type.json 生成 draft.tex：包含 Abstract、Introduction、Related Work、Method、Experiments、Conclusion、Limitations，每章有具体内容。"
+
+- id: INIT-004
+  title: references.bib 已生成
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-003"]
+  pass_condition: ".paper/output/references.bib 存在且至少包含 5 个有效的 BibTeX 条目。"
+  fix_hint: "提取 draft.tex 中的 \\cite{}，搜索相关文献，生成 BibTeX 条目，确保包含近五年文献。"
+
+- id: INIT-005
+  title: 实验代码已生成
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-003"]
+  pass_condition: ".paper/output/code/main.py 存在且包含基本结构（>=10 行），包含 import、模型/函数定义或训练循环。"
+  fix_hint: "根据 draft.tex 中的 Method 和 Experiments 生成 Python 实验代码，使用真实数据集。"
+
+- id: INIT-006
+  title: 计算环境已检测并记录
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-001"]
+  pass_condition: ".paper/state/compute-env.json 存在且包含 device（ssh_gpu/cuda/mps/cpu 之一）、available 字段。"
+  fix_hint: "运行 scripts/compute-detect.sh 检测计算环境（SSH GPU → CUDA → MPS → CPU），将结果写入 compute-env.json。设置 COMPUTE_SSH_HOST/COMPUTE_SSH_KEY 环境变量以启用 SSH 远程 GPU。"

@@ -1,0 +1,51 @@
+rules:
+- id: LIT-001
+  title: Related Work 章节存在
+  severity: blocking
+  evaluator: script
+  pass_condition: "draft.tex 包含 Related Work 或 Background 或 Literature Review 章节（通过关键词检测）。"
+  fix_hint: "添加 Related Work 章节，综述相关研究工作。"
+
+- id: LIT-002
+  title: 文献语料目录与索引
+  severity: blocking
+  evaluator: script
+  depends_on: ["LIT-001"]
+  pass_condition: "`.paper/input/papers/` 存在（支持 pdf/txt/md）；`.paper/state/lit-corpus-index.json` 存在且包含 papers[]，每项含 paper_id/source_type/path。"
+  fix_hint: "创建 papers/ 目录并放入文献文件，生成 lit-corpus-index.json。"
+
+- id: LIT-003
+  title: Markdown citation cards 存在且格式正确
+  severity: blocking
+  evaluator: script
+  depends_on: ["LIT-002"]
+  pass_condition: "`.paper/output/citation-cards/` 存在，至少 1 个 .md 文件，不含 json/yaml/txt 等其他格式。"
+  fix_hint: "生成 Markdown 引文卡片，删除非 md 文件。"
+
+- id: LIT-004
+  title: 关键论文覆盖（LLM 评估）
+  severity: blocking
+  evaluator: llm
+  depends_on: ["LIT-001"]
+  pass_condition: "领域关键论文（根据 Semantic Scholar 搜索结果前 20 篇相关论文）已被引用，且与本文工作形成对比。"
+  fix_hint: "补充相关领域关键论文引用。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/citation-payload"
+
+- id: LIT-005
+  title: Novelty 与现有工作区分（LLM 评估）
+  severity: blocking
+  evaluator: llm
+  depends_on: ["LIT-004"]
+  pass_condition: "Related Work 包含与现有工作的对比分析，使用'we differ from'/'in contrast to'等对比语言，明确说明本文创新点。"
+  fix_hint: "在 Related Work 中添加 novelty comparison。"
+
+- id: LIT-006
+  title: 文献综述完整性（LLM 评估）
+  severity: advisory
+  evaluator: llm
+  depends_on: ["LIT-001", "LIT-004", "LIT-005"]
+  pass_condition: "Related Work 涵盖问题定义、方法分类、代表性工作、研究空白；所有引用条目真实存在（title/year/author 与原文一致）。"
+  fix_hint: "扩展 Related Work，验证引用准确性。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/citation-payload"
