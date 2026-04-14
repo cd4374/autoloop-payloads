@@ -1,0 +1,33 @@
+rules:
+  - id: PL-001
+    title: 查重报告生成
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/plagiarism-report.json 存在且 status=success。"
+    fix_hint: "调用查重 API（如 Turnitin/iThenticate/SmallSEOTools），生成 plagiarism-report.json。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: plagiarism-report.json
+          conditions:
+            - path: $.status
+              op: eq
+              value: success
+
+  - id: PL-002
+    title: 相似度低于阈值
+    severity: blocking
+    evaluator: script
+    depends_on: ["PL-001"]
+    pass_condition: "plagiarism-report.json 中 similarity_pct <= 15.0。"
+    fix_hint: "若相似度过高，重写重复内容后重新查重。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: plagiarism-report.json
+          conditions:
+            - path: $.similarity_pct
+              op: le
+              value: 15.0

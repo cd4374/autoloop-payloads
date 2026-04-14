@@ -1,0 +1,31 @@
+rules:
+  - id: ET-001
+    title: Claims 追踪记录
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/evidence-trace.json 存在且 claims 数组非空。"
+    fix_hint: "分析 draft.tex 中的 claims，提取每个 claim 对应的实验证据，生成 evidence-trace.json。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: evidence-trace.json
+          conditions:
+            - path: $.claims
+              op: non_empty_list
+
+  - id: ET-002
+    title: Claims 数量合理
+    severity: blocking
+    evaluator: script
+    depends_on: ["ET-001"]
+    pass_condition: "evidence-trace.json 中 claims 数量 >= 1，每个 claim 有 evidence_ref。"
+    fix_hint: "补充 claims 的 evidence_ref，移除无证据支持的 claim。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: evidence-trace.json
+          conditions:
+            - path: $.claims
+              op: exists

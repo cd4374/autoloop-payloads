@@ -1,0 +1,33 @@
+rules:
+  - id: ER-001
+    title: 外部审查记录
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/external-review-log.json 存在且 verdict != blocking。"
+    fix_hint: "运行外部审查工具（如 academic-review-api），将结果写入 external-review-log.json。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: external-review-log.json
+          conditions:
+            - path: $.verdict
+              op: not_eq
+              value: blocking
+
+  - id: ER-002
+    title: 审查评分达标
+    severity: blocking
+    evaluator: script
+    depends_on: ["ER-001"]
+    pass_condition: "external-review-log.json 中 score >= 60。"
+    fix_hint: "根据审查反馈修改论文，提升评分。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: external-review-log.json
+          conditions:
+            - path: $.score
+              op: ge
+              value: 60

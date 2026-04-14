@@ -1,0 +1,43 @@
+rules:
+  - id: RP-001
+    title: 实验代码可运行
+    severity: blocking
+    evaluator: script
+    pass_condition: "python3 .paper/output/code/main.py 运行成功（exit_code=0），生成 logs/run_*.log。"
+    fix_hint: "修复实验代码，确保可运行。检查依赖是否安装、数据集是否可下载。"
+    check:
+      type: command
+      cmd: "cd $PROJECT_ROOT && python3 .paper/output/code/main.py"
+      expects: exit_code
+      timeout: 600
+
+  - id: RP-002
+    title: 实验日志生成
+    severity: blocking
+    evaluator: script
+    depends_on: ["RP-001"]
+    pass_condition: "logs/ 目录下至少生成了 1 个 run_*.log 文件，且文件非空。"
+    fix_hint: "确保实验代码输出到 logs/ 目录。"
+    check:
+      type: count
+      source: .paper/output/logs
+      pattern: run_*.log
+      op: ge
+      threshold: 1
+
+  - id: RP-003
+    title: 运行时证据记录
+    severity: blocking
+    evaluator: script
+    depends_on: ["RP-001"]
+    pass_condition: ".paper/state/runtime-proof.json 存在且 exit_code=0。"
+    fix_hint: "生成 runtime-proof.json，记录实验运行的退出码和关键指标。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: runtime-proof.json
+          conditions:
+            - path: $.exit_code
+              op: eq
+              value: 0

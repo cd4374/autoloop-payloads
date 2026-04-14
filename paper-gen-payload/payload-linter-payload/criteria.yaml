@@ -1,0 +1,25 @@
+rules:
+  - id: LINT-001
+    title: Payload 目录结构合法
+    severity: blocking
+    evaluator: script
+    pass_condition: "目标 payload 目录包含 criteria.yaml 和 session.md。"
+    fix_hint: "修复 payload 目录结构，确保包含 criteria.yaml 和 session.md。"
+    check:
+      type: files_exist
+      files:
+        - criteria.yaml
+        - session.md
+
+  - id: LINT-002
+    title: criteria.yaml 格式正确
+    severity: blocking
+    evaluator: script
+    depends_on: ["LINT-001"]
+    pass_condition: "criteria.yaml 可被解析为有效 YAML，包含 rules 数组。"
+    fix_hint: "修复 criteria.yaml 格式，确保 YAML 可解析且包含 rules 字段。"
+    check:
+      type: command
+      cmd: "python3 -c \"import yaml,sys; yaml.safe_load(open('criteria.yaml')); sys.exit(0)\""
+      expects: exit_code
+      timeout: 10

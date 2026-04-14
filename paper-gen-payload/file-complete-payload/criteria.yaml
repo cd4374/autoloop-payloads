@@ -1,6 +1,4 @@
 rules:
----
-rules:
   - id: FILE-001
     title: 核心文件完整性
     severity: blocking

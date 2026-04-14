@@ -1,0 +1,21 @@
+rules:
+  - id: IDEA-001
+    title: idea.md 内容非空
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/input/idea.md 存在且内容非空（>=50 字符）。"
+    fix_hint: "在 .paper/input/idea.md 中撰写研究想法。"
+    check:
+      type: count
+      source: .paper/input/idea.md
+      pattern: '.'
+      op: ge
+      threshold: 50
+
+  - id: IDEA-002
+    title: 研究想法清晰
+    severity: blocking
+    evaluator: llm
+    depends_on: ["IDEA-001"]
+    pass_condition: "idea.md 包含：1) 研究问题描述；2) 现有方法的不足；3) 本文创新点；4) 预期结果。内容具体、逻辑清晰。"
+    fix_hint: "完善 idea.md，补充问题描述、创新点和预期结果。"
