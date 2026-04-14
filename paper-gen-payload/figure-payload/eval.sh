@@ -7,41 +7,32 @@ set -euo pipefail
 
 # Resolve paths relative to this script's location (not cwd)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_SESSION="${PARENT_SESSION:-$SCRIPT_DIR/../session.md}"
+PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
 FIGURES_DIR="${FIGURES_DIR:-.paper/output/figures}"
 
 # Pass paths to Python via environment
-export PARENT_SESSION DRAFT_FILE FIGURES_DIR
+export PAPER_TYPE_FILE DRAFT_FILE FIGURES_DIR
 
 python3 << 'PYEOF'
 import json, os, re, subprocess
 
 # Read from environment (set by shell section above)
-PARENT_SESSION = os.environ['PARENT_SESSION']
+PAPER_TYPE_FILE = os.environ['PAPER_TYPE_FILE']
 DRAFT_FILE = os.environ['DRAFT_FILE']
 FIGURES_DIR = os.environ['FIGURES_DIR']
 
-# Load thresholds from parent session.md
+# Load thresholds from paper type state
 def load_thresholds():
     try:
-        import yaml
-        with open(PARENT_SESSION) as f:
-            content = f.read()
-        match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-        if match:
-            fm = yaml.safe_load(match.group(1))
-            thresholds = {
-                'NeurIPS': {'min_figures': 5, 'min_tables': 1},
-                'ICML':    {'min_figures': 5, 'min_tables': 1},
-                'ICLR':    {'min_figures': 5, 'min_tables': 1},
-                'AAAI':    {'min_figures': 4, 'min_tables': 1},
-                'Journal': {'min_figures': 5, 'min_tables': 2},
-                'Short':   {'min_figures': 3, 'min_tables': 1},
-                'Letter':  {'min_figures': 2, 'min_tables': 1},
+        if os.path.isfile(PAPER_TYPE_FILE):
+            with open(PAPER_TYPE_FILE) as f:
+                pt = json.load(f)
+            derived = pt.get('derived_thresholds', {})
+            return {
+                'min_figures': derived.get('min_figures', 5),
+                'min_tables': derived.get('min_tables', 1),
             }
-            pt = fm.get('paper_type', 'NeurIPS')
-            return thresholds.get(pt, thresholds['NeurIPS'])
     except Exception:
         pass
     return {'min_figures': 5, 'min_tables': 1}

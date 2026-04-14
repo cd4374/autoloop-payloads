@@ -2,6 +2,9 @@
   title: 顶级内容生成 - draft.tex 和论文结构
   severity: blocking
   evaluator: script
+  # 不设置 depends_on：PG-036 是入口节点，触发 paper-init-payload 生成初始文件。
+  # pass_condition 检查文件是否存在；初始运行时文件不存在则触发 fix_skill，
+  # paper-init 完成后 PG-036 才通过。后续迭代中文件已存在则直接通过。
   pass_condition: ".paper/output/draft.tex 存在且文件大小 > 100 字节，包含 LaTeX 基本结构（\\documentclass、\\begin{document}、\\end{document}）"
   fix_hint: "根据 idea.md 生成完整的 draft.tex：1) 读取 .paper/input/idea.md 获取研究主题；2) 根据 payload 配置确定文档类（如 NeurIPS 2025）和页数限制；3) 生成包含 Abstract、Introduction、Related Work、Method、Experiments、Conclusion、Limitations、References 的完整论文，每个章节有具体内容而非占位符；4) 生成 references.bib（至少 5 个真实引用）和 code/main.py（基本结构）"
   fix_skill: loop-run
@@ -11,6 +14,9 @@
   title: 论文初始化完成
   severity: blocking
   evaluator: script
+  # PG-036 已触发 paper-init-payload；PG-037 等待 PG-036 通过后再验证文件是否完整。
+  # 注意：paper-init-payload 内部的 INIT-004/005/006 等会在子 payload 内自动完成，
+  # 不需要在本 payload 层面引用 INIT-* IDs（跨文件引用在 autoloop 基座中无效）。
   depends_on: ["PG-036"]
   pass_condition: ".paper/output/draft.tex 存在且文件大小 > 100 字节，.paper/output/references.bib 存在且至少包含 5 个 BibTeX 条目，.paper/output/code/main.py 存在"
   fix_hint: "启动论文初始化流程，通过 paper-init-payload 生成 draft.tex、references.bib、实验代码等基础文件。这是端到端生成的第一步。"
@@ -21,7 +27,10 @@
   title: pipeline 状态持续更新
   severity: blocking
   evaluator: script
-  depends_on: ["PG-037"]
+  # 直接依赖 PG-036（触发 paper-init），而非 PG-037。
+  # 避免 PG-037 的 fix_skill 已触发 paper-init 后，PG-038 再次触发。
+  # PG-036 -> paper-init (INIT-002 创建 pipeline-status.json) -> PG-037 (检查结果) -> PG-038 (验证状态)
+  depends_on: ["PG-036"]
   pass_condition: ".paper/state/pipeline-status.json 包含 current_stage、completed_stages、round、last_updated 字段；completed_stages 非空并包含 paper-init。"
   fix_hint: "更新 .paper/state/pipeline-status.json：1) 从 completed_stages 数组中移除已完成的阶段；2) 向 completed_stages 追加当前完成的阶段（如 paper-init）；3) 更新 current_stage 为下一阶段；4) 将 round 递增；5) 将 last_updated 更新为当前 UTC 时间（ISO-8601 格式）。"
   fix_skill: loop-run
@@ -442,3 +451,43 @@
   fix_hint: "执行 payload-linter-payload，修复协议不一致与结构错误。"
   fix_skill: loop-run
   fix_skill_args: "PAYLOAD=paper-gen-payload/payload-linter-payload"
+
+- id: PG-046
+  title: 文献语料目录与索引完整
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-037"]
+  pass_condition: "`.paper/input/papers/` 存在且包含文献文件（支持 manual/downloaded），并存在 `.paper/state/lit-corpus-index.json` 且 `papers[]` 非空。"
+  fix_hint: "执行 lit-payload，补齐文献语料目录和 lit-corpus-index.json。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/lit-payload"
+
+- id: PG-047
+  title: Markdown citation cards 完整
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-046", "PG-004"]
+  pass_condition: "`.paper/output/citation-cards/` 存在且仅包含 `.md` 文件，每个卡片可映射到 references.bib（bib key/DOI/arXiv 任一）。"
+  fix_hint: "执行 citation-payload，生成 Markdown 卡片并补齐到 bib 的映射。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/citation-payload"
+
+- id: PG-048
+  title: venue 模板选择一致
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-020", "PG-021"]
+  pass_condition: "`.paper/state/template-selection.json` 与 `writing-payload/templates/registry.json` 一致；selected_template_id 可解析且其 `entry_tex` 存在；draft.tex 的 documentclass/required_markers 与 selected_template_id 匹配。"
+  fix_hint: "执行 writing-payload，修复模板选择状态与 draft.tex 的一致性。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/writing-payload"
+
+- id: PG-049
+  title: hard-review 后 Vx 交付包
+  severity: blocking
+  evaluator: script
+  depends_on: ["PG-040", "PG-041", "PG-042", "PG-043", "PG-044"]
+  pass_condition: "hard gate 全通过后，项目根目录存在最新 `Vx/`（递增版本）并包含 `code/`、`latex/`、`else-supports/`，且 `.paper/state/release-package.json` 完整。"
+  fix_hint: "执行 file-complete-payload，基于 hard gate 证据生成下一版 Vx 交付包并写入 release-package.json。"
+  fix_skill: loop-run
+  fix_skill_args: "PAYLOAD=paper-gen-payload/file-complete-payload"

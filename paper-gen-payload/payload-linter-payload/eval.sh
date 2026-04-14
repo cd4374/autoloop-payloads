@@ -153,34 +153,115 @@ PYEOF
 }
 
 # LNT-003: script 输出与 criteria 对齐
+#
+# 对齐规则（来自 PAYLOAD_SPEC §2.3）：
+#   - "eval.sh 只评估 evaluator: script 的 criterion"
+#   - "evaluator: llm 的 criterion 不应由 eval.sh 返回"
+# 因此正确性要求：
+#   1. eval.sh 输出的每个 ID 必须是该 payload 中 evaluator=script 的 criterion（不多报）
+#   2. 每个 evaluator=script 的 criterion ID 必须在 eval.sh 输出中出现（不漏报）
+#   3. 纯 LLM payload（无 script criteria）eval.sh 输出 [] 视为正确
 lnt003_eval() {
   local pass="false"
   local evidence=""
 
   if [[ -f "$LINT_REPORT_FILE" ]]; then
-    local ok
-    ok=$(python3 - <<PYEOF
-import json
-try:
-    with open('$LINT_REPORT_FILE') as f:
-        d = json.load(f)
-    checks = d.get('checks', {})
-    aligned = bool(checks.get('script_alignment', False))
-    print('true' if aligned else 'false')
-except Exception:
-    print('false')
+    local result
+    result=$(python3 - <<'PYEOF'
+import glob, os, re, json, subprocess
+
+root = '$ROOT_DIR'
+payload_dirs = sorted([
+    p for p in glob.glob(os.path.join(root, '*-payload'))
+    if os.path.isdir(p) and not os.path.basename(p).startswith('.')
+])
+id_pattern = re.compile(r'^[A-Z]+-\d{3}$')
+
+def parse_criteria_script_ids(criteria_path):
+    """Return set of evaluator=script criterion IDs."""
+    items = []
+    current = None
+    with open(criteria_path, encoding='utf-8') as f:
+        for raw in f:
+            line = raw.rstrip('\n')
+            if re.match(r'^-\s+id:\s*', line):
+                if current:
+                    items.append(current)
+                current = {'id': line.split(':', 1)[1].strip(), 'evaluator': None}
+            elif current and re.match(r'^\s+evaluator:\s*', line):
+                current['evaluator'] = line.split(':', 1)[1].strip()
+            elif re.match(r'^[^-\s]', line) or re.match(r'^-\s+[^i]', line):
+                if current:
+                    items.append(current)
+                    current = None
+        if current:
+            items.append(current)
+    return {item['id'] for item in items if item.get('evaluator') == 'script'}
+
+def parse_eval_output(eval_sh_path):
+    """Run eval.sh and extract criterion IDs from JSON output."""
+    try:
+        r = subprocess.run(
+            ['bash', eval_sh_path],
+            capture_output=True, timeout=60,
+            cwd=os.path.dirname(eval_sh_path)
+        )
+        try:
+            data = json.loads(r.stdout.strip())
+            results = data.get('results', [])
+            if isinstance(results, list):
+                return {item['id'] for item in results if 'id' in item and id_pattern.match(str(item['id']))}
+        except json.JSONDecodeError:
+            pass
+    except Exception:
+        pass
+    return set()
+
+all_ok = True
+fail_details = []
+
+for pd in payload_dirs:
+    pb_name = os.path.basename(pd)
+    criteria_path = os.path.join(pd, 'criteria.md')
+    eval_sh_path = os.path.join(pd, 'eval.sh')
+
+    if not os.path.exists(criteria_path) or not os.path.exists(eval_sh_path):
+        continue
+
+    script_ids = parse_criteria_script_ids(criteria_path)
+    output_ids = parse_eval_output(eval_sh_path)
+
+    # Rule 1: output ⊇ script_ids  (no missing script criteria)
+    missing = script_ids - output_ids
+    # Rule 2: output ⊆ script_ids  (no extra LLM criteria in output)
+    extra = output_ids - script_ids
+
+    if missing or extra:
+        all_ok = False
+        detail = f"{pb_name}: script_ids={sorted(script_ids)}, output_ids={sorted(output_ids)}"
+        if missing:
+            detail += f", missing={sorted(missing)}"
+        if extra:
+            detail += f", extra={sorted(extra)}"
+        fail_details.append(detail)
+
+if all_ok:
+    print('true')
+else:
+    print('false:' + ' | '.join(fail_details[:3]))
 PYEOF
 )
-    if [[ "$ok" == "true" ]]; then
+
+    if [[ "$result" == "true" ]]; then
       pass="true"
-      evidence="payload-lint-report.json 显示 script_alignment=true"
+      evidence="所有 payload eval.sh 输出与 criteria script ID 集合对齐"
     else
       pass="false"
-      evidence="payload-lint-report.json 缺失或 script_alignment=false"
+      evidence="对齐失败: ${result#false:}"
     fi
   else
     pass="false"
-    evidence="缺少 .paper/state/payload-lint-report.json，无法验证 script alignment"
+    evidence="缺少 .paper/state/payload-lint-report.json，跳过对齐检查"
   fi
 
   echo "{\"id\":\"LNT-003\",\"pass\":$pass,\"evidence\":\"$evidence\"}"

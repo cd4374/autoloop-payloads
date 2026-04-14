@@ -13,6 +13,14 @@
   pass_condition: ".paper/state/pipeline-status.json 存在且包含 current_stage、completed_stages 字段"
   fix_hint: "创建 pipeline-status.json，设置 current_stage='paper-init'，completed_stages=[]"
 
+- id: INIT-003
+  title: paper-type.json 已初始化
+  severity: blocking
+  evaluator: script
+  depends_on: ["INIT-001"]
+  pass_condition: ".paper/state/paper-type.json 存在且包含 venue、paper_domain、derived_thresholds 字段"
+  fix_hint: "创建 .paper/state/paper-type.json，从父 payload session.md 读取 paper_type/domain 配置，计算 derived_thresholds（min_references/min_figures/min_tables/page_limit/abstract_max_words/min_experiment_runs/require_ablation/min_recent_refs_pct），写入 JSON。"
+
 - id: INIT-004
   title: draft.tex 已生成
   severity: blocking

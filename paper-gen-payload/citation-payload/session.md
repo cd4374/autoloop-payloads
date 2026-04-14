@@ -24,3 +24,4 @@ max_iter: 3
 
 - `.paper/state/citation-status.json`: 验证状态、verified_count、hallucinated_count
 - `.paper/loop-logs/citation-round-{N}.json`: 各轮次验证结果
+- `.paper/output/citation-cards/`: 引文卡片目录（仅 Markdown）

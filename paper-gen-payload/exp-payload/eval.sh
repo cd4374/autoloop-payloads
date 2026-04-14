@@ -4,44 +4,10 @@ set -euo pipefail
 # Experiment Loop Evaluation Script
 # Configuration inherited from parent payload's session.md
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_SESSION="$SCRIPT_DIR/../session.md"
-
 CODE_DIR="${CODE_DIR:-.paper/output/code}"
 LOGS_DIR="${LOGS_DIR:-.paper/output/logs}"
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
-
-# Load config from parent session.md
-load_config() {
-    python3 -c "
-import yaml, re, json
-with open('$PARENT_SESSION') as f:
-    content = f.read()
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    thresholds = {
-        'NeurIPS': {'min_experiment_runs': 3, 'require_ablation': True},
-        'ICML': {'min_experiment_runs': 3, 'require_ablation': True},
-        'ICLR': {'min_experiment_runs': 3, 'require_ablation': True},
-        'AAAI': {'min_experiment_runs': 3, 'require_ablation': True},
-        'Journal': {'min_experiment_runs': 5, 'require_ablation': True},
-        'Short': {'min_experiment_runs': 3, 'require_ablation': False},
-        'Letter': {'min_experiment_runs': 3, 'require_ablation': False},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
-    print(json.dumps({
-        'min_experiment_runs': t['min_experiment_runs'],
-        'require_ablation': frontmatter.get('require_ablation', t['require_ablation']),
-    }))
-else:
-    print(json.dumps({'min_experiment_runs': 3, 'require_ablation': True}))
-"
-}
-CONFIG=$(load_config)
-MIN_RUNS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_experiment_runs'])")
-REQUIRE_ABLATION=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['require_ablation'])")
+PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 
 check_runnable() {
     local file="$1"
@@ -109,7 +75,7 @@ check_seed_fixed() {
         echo "false"
         return
     fi
-    if grep -qrE '(random\.seed|torch\.manual_seed|np\.random\.seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
+    if grep -qrE '(random\.seed|torch\.(cuda\.)?manual_seed|torch\.cuda\.manual_seed_all|np\.random\.seed|numpy\.random\.seed|tf\.random\.set_seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
         echo "true"
     else
         echo "false"
@@ -225,8 +191,8 @@ main() {
     local runs
     runs=$(count_runs "$LOGS_DIR")
     local min="3"
-    if [[ -f "$PAPER_TYPE" ]]; then
-        min=$(python3 -c "import json; print(json.load(open('$PAPER_TYPE')).get('derived_thresholds', {}).get('min_experiment_runs', 3))" 2>/dev/null || echo "3")
+    if [[ -f "$PAPER_TYPE_FILE" ]]; then
+        min=$(python3 -c "import json; print(json.load(open('$PAPER_TYPE_FILE')).get('derived_thresholds', {}).get('min_experiment_runs', 3))" 2>/dev/null || echo "3")
     fi
 
     if [[ "$runs" -ge "$min" ]]; then
@@ -303,9 +269,9 @@ main() {
     local equip_pass="true"
     local equip_ev="非 physics domain 或无需检查"
 
-    if [[ -f "$PAPER_TYPE" ]]; then
+    if [[ -f "$PAPER_TYPE_FILE" ]]; then
         local domain
-        domain=$(check_domain "$PAPER_TYPE")
+        domain=$(check_domain "$PAPER_TYPE_FILE")
         if [[ "$domain" == "physics" ]]; then
             # EXP-012: Uncertainty calculation
             if [[ -f "$DRAFT_FILE" ]]; then

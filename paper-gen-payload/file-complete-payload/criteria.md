@@ -70,3 +70,26 @@
   depends_on: ["FILE-001", "FILE-002", "FILE-003", "FILE-004", "FILE-005", "FILE-006"]
   pass_condition: "所有以下文件均存在且非空：draft.tex, references.bib, paper.pdf, code/main.py, code/requirements.txt, reproducibility.json。"
   fix_hint: "补充缺失的文件。运行 latexmk 生成 PDF，运行 pip freeze 生成 requirements.txt。"
+
+- id: FILE-011
+  title: release 触发条件满足
+  severity: blocking
+  evaluator: script
+  pass_condition: "`.paper/state/runtime-proof.json`、`.paper/state/external-review-log.json`、`.paper/state/evidence-trace.json`、`.paper/state/plagiarism-report.json`、`.paper/state/dataset-inventory.json` 全部存在且符合 hard gate 的基本 pass 条件。"
+  fix_hint: "先完成 runtime-proof/external-review/evidence-trace/plagiarism/dataset-license 等 hard gate 证据。"
+
+- id: FILE-012
+  title: 根目录版本包结构
+  severity: blocking
+  evaluator: script
+  depends_on: ["FILE-011"]
+  pass_condition: "项目根目录存在最新 `Vx/`，且包含 `code/`、`latex/`、`else-supports/` 子目录。"
+  fix_hint: "在 hard gate 通过后创建下一个版本目录并补齐三个子目录。"
+
+- id: FILE-013
+  title: release-package 状态文件完整
+  severity: blocking
+  evaluator: script
+  depends_on: ["FILE-012"]
+  pass_condition: "`.paper/state/release-package.json` 存在，包含 `version_folder`、`created_at`、`trigger`、`evidence_refs`。"
+  fix_hint: "生成 release-package.json 并记录版本号、触发来源和证据路径。"

@@ -59,11 +59,11 @@
   fix_hint: "生成 Limitations"
 
 - id: WRT-009
-  title: LaTeX 格式规范
+  title: LaTeX 模板匹配
   severity: blocking
   evaluator: script
-  pass_condition: "draft.tex 符合目标 venue 格式要求（使用正确 documentclass、宏包）"
-  fix_hint: "调整 LaTeX 格式"
+  pass_condition: "根据 `.paper/state/template-selection.json` 与 `templates/registry.json`，selected_template_id 可解析且其 `entry_tex` 存在；draft.tex 使用正确 documentclass，并满足该模板的 required_markers。"
+  fix_hint: "更新 template-selection.json 或调整 draft.tex，使其与模板注册表（含 entry_tex/documentclass/required_markers）一致。"
 
 - id: WRT-010
   title: 图表引用完整
@@ -71,3 +71,11 @@
   evaluator: script
   pass_condition: "draft.tex 中的 \\includegraphics 对应 figures/ 目录下的真实文件"
   fix_hint: "补充缺失图表或修正引用路径"
+
+- id: WRT-011
+  title: 模板选择状态一致性
+  severity: blocking
+  evaluator: script
+  depends_on: ["WRT-009"]
+  pass_condition: "`.paper/state/template-selection.json` 存在，包含 target_venue/selected_template_id/source_of_truth/constraints/selected_at，且 selected_template_id 在 `templates/registry.json` 中可解析并具有有效 `entry_tex`（指向现有官方模板文件）。"
+  fix_hint: "补全 template-selection.json 必填字段，并确保 selected_template_id 在 registry 中存在且 entry_tex 指向有效官方模板文件。"

@@ -60,3 +60,34 @@
   depends_on: ["LIT-001", "LIT-002", "LIT-003"]
   pass_condition: "Related Work 涵盖问题定义、方法分类、代表性工作、研究空白等方面，无重大遗漏。"
   fix_hint: "扩展 Related Work，确保覆盖该领域主要研究方向和代表工作。"
+
+- id: LIT-009
+  title: 文献语料目录存在
+  severity: blocking
+  evaluator: script
+  pass_condition: "`.paper/input/papers/` 存在，且至少包含一篇文献（支持 papers/ 根目录、downloaded/、manual/）。"
+  fix_hint: "创建 `.paper/input/papers/` 并放入文献文件（pdf/txt/md 均可）。"
+
+- id: LIT-010
+  title: 文献语料索引完整
+  severity: blocking
+  evaluator: script
+  depends_on: ["LIT-009"]
+  pass_condition: "`.paper/state/lit-corpus-index.json` 存在且包含 `papers[]`，每项至少含 `paper_id/source_type/path`。"
+  fix_hint: "生成 lit-corpus-index.json，补齐 papers 列表和关键字段。"
+
+- id: LIT-011
+  title: Markdown citation cards 产物存在
+  severity: blocking
+  evaluator: script
+  depends_on: ["LIT-010"]
+  pass_condition: "`.paper/output/citation-cards/` 存在，且至少 1 个 `.md` 卡片文件。"
+  fix_hint: "在 citation-cards 目录生成 Markdown 引文卡片。"
+
+- id: LIT-012
+  title: citation cards 格式约束
+  severity: blocking
+  evaluator: script
+  depends_on: ["LIT-011"]
+  pass_condition: "`.paper/output/citation-cards/` 下仅允许 `.md` 文件，不允许 json/yaml/txt 等其他格式。"
+  fix_hint: "将 citation cards 统一转换为 `.md`，删除或迁移非 md 文件。"

@@ -21,3 +21,4 @@ max_iter: 3
 
 - `.paper/state/idea-status.json`: 当前最佳想法及其评分
 - `.paper/loop-logs/idea-round-{N}.json`: 各轮次候选想法列表
+- `.paper/input/papers/manual/`: 用户手工补充的文献入口（供 lit/citation loop 使用）

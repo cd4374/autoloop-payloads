@@ -95,13 +95,22 @@ MIN_RUNS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.std
 REQUIRE_ABLATION=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['require_ablation'])")
 MIN_RECENT_PCT=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_recent_refs_pct'])")
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$SCRIPT_DIR}"
 OUTPUT_DIR=".paper/output"
+STATE_DIR=".paper/state"
 REFS_FILE="$OUTPUT_DIR/references.bib"
 DRAFT_FILE="$OUTPUT_DIR/draft.tex"
 PDF_FILE="$OUTPUT_DIR/paper.pdf"
 CODE_DIR="$OUTPUT_DIR/code"
 REPRO_FILE="$OUTPUT_DIR/reproducibility.json"
-PIPELINE_FILE=".paper/state/pipeline-status.json"
+PIPELINE_FILE="$STATE_DIR/pipeline-status.json"
+PAPERS_DIR=".paper/input/papers"
+LIT_CORPUS_INDEX_FILE="$STATE_DIR/lit-corpus-index.json"
+CITATION_CARDS_DIR="$OUTPUT_DIR/citation-cards"
+TEMPLATE_SELECTION_FILE="$STATE_DIR/template-selection.json"
+TEMPLATE_REGISTRY_FILE="$SCRIPT_DIR/writing-payload/templates/registry.json"
+RELEASE_STATE_FILE="$STATE_DIR/release-package.json"
 
 # Helper: Check file exists
 check_file() { [[ -f "$1" ]] && echo "true" || echo "false"; }
@@ -193,7 +202,7 @@ check_random_seed() {
         echo "false"
         return
     fi
-    if grep -qrE '(random\.seed|torch\.manual_seed|np\.random\.seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
+    if grep -qrE '(random\.seed|torch\.(cuda\.)?manual_seed|torch\.cuda\.manual_seed_all|np\.random\.seed|numpy\.random\.seed|tf\.random\.set_seed|set_seed|manual_seed_all)' "$dir"/*.py 2>/dev/null; then
         echo "true"
     else
         echo "false"
@@ -517,10 +526,8 @@ pg005_eval() {
     else
         local total=$(count_bib_entries "$REFS_FILE")
         local recent=$(count_recent_refs "$REFS_FILE")
-        local pct=0
-        if [[ "$total" -gt 0 ]]; then
-            pct=$((recent * 100 / total))
-        fi
+        local pct
+        pct=$(python3 -c "print(round($recent * 100 / $total, 1))" 2>/dev/null || echo "0")
 
         if [[ "$pct" -ge "$MIN_RECENT_PCT" ]]; then
             pass="true"
@@ -1260,13 +1267,316 @@ PYEOF
     echo '{"id":"PG-045","pass":'$pass',"evidence":"'$evidence'"}'
 }
 
+# PG-046: 文献语料目录与索引完整
+pg046_eval() {
+    local pass="false"
+    local evidence=""
+
+    local papers_ok="false"
+    if [[ -d "$PAPERS_DIR" ]]; then
+        local paper_count
+        paper_count=$(find "$PAPERS_DIR" -type f \( -name "*.pdf" -o -name "*.txt" -o -name "*.md" \) 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$paper_count" -gt 0 ]]; then
+            papers_ok="true"
+        fi
+    fi
+
+    local index_ok="false"
+    if [[ -f "$LIT_CORPUS_INDEX_FILE" ]]; then
+        index_ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$LIT_CORPUS_INDEX_FILE') as f:
+        d = json.load(f)
+    papers = d.get('papers', [])
+    ok = isinstance(papers, list) and len(papers) > 0
+    if ok:
+        for p in papers:
+            if not isinstance(p, dict):
+                ok = False
+                break
+            for k in ('paper_id','source_type','path'):
+                if str(p.get(k, '')).strip() == '':
+                    ok = False
+                    break
+            if not ok:
+                break
+    print('true' if ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+    fi
+
+    if [[ "$papers_ok" == "true" ]] && [[ "$index_ok" == "true" ]]; then
+        pass="true"
+        evidence="文献语料目录与 lit-corpus-index 均有效"
+    elif [[ "$papers_ok" != "true" ]]; then
+        pass="false"
+        evidence="缺少文献语料目录或无文献文件（.paper/input/papers）"
+    else
+        pass="false"
+        evidence="lit-corpus-index.json 缺失或字段不完整"
+    fi
+
+    echo '{"id":"PG-046","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-047: Markdown citation cards 完整
+pg047_eval() {
+    local pass="false"
+    local evidence=""
+
+    local card_dir_ok="false"
+    local mapping_ok="false"
+
+    if [[ -d "$CITATION_CARDS_DIR" ]]; then
+        local total non_md
+        total=$(find "$CITATION_CARDS_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+        non_md=$(find "$CITATION_CARDS_DIR" -maxdepth 1 -type f ! -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$total" -gt 0 ]] && [[ "$non_md" -eq 0 ]]; then
+            card_dir_ok="true"
+        fi
+
+        if [[ -f "$REFS_FILE" ]]; then
+            mapping_ok=$(python3 - <<PYEOF
+import os, re
+cards_dir = '$CITATION_CARDS_DIR'
+refs_file = '$REFS_FILE'
+try:
+    with open(refs_file) as f:
+        bib = f.read()
+except Exception:
+    print('false')
+    raise SystemExit(0)
+
+bib_keys = set(k.strip() for k in re.findall(r'^@\w+\{([^,]+)', bib, re.MULTILINE))
+dois = set()
+arxiv_ids = set()
+for d in re.findall(r"doi\s*=\s*[\"{']([^\"}']+)[\"}']", bib, re.IGNORECASE):
+    v = d.strip().lower().replace('https://doi.org/','').replace('http://doi.org/','').replace('doi:','')
+    dois.add(v)
+for a in re.findall(r"(?:eprint|arxiv)\s*=\s*[\"{']([^\"}']+)[\"}']", bib, re.IGNORECASE):
+    v = a.strip().lower().replace('arxiv:','').replace(' ','')
+    arxiv_ids.add(v)
+
+cards = [fn for fn in os.listdir(cards_dir) if fn.lower().endswith('.md') and os.path.isfile(os.path.join(cards_dir, fn))]
+if not cards:
+    print('false')
+    raise SystemExit(0)
+
+ok = True
+for fn in cards:
+    with open(os.path.join(cards_dir, fn)) as f:
+        t = f.read().lower()
+    mapped = False
+    for k in bib_keys:
+        if ('@' + k.lower()) in t:
+            mapped = True
+            break
+    if not mapped:
+        for d in dois:
+            if d and d in t:
+                mapped = True
+                break
+    if not mapped:
+        for a in arxiv_ids:
+            if a and a in t:
+                mapped = True
+                break
+    if not mapped:
+        ok = False
+        break
+
+print('true' if ok else 'false')
+PYEOF
+)
+        fi
+    fi
+
+    if [[ "$card_dir_ok" == "true" ]] && [[ "$mapping_ok" == "true" ]]; then
+        pass="true"
+        evidence="citation-cards 为 Markdown 且可映射到 references.bib"
+    elif [[ "$card_dir_ok" != "true" ]]; then
+        pass="false"
+        evidence="citation-cards 缺失、为空或包含非 Markdown 文件"
+    else
+        pass="false"
+        evidence="citation-cards 与 references.bib 映射不完整"
+    fi
+
+    echo '{"id":"PG-047","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-048: venue 模板选择一致
+pg048_eval() {
+    local pass="false"
+    local evidence=""
+
+    if [[ ! -f "$TEMPLATE_SELECTION_FILE" ]]; then
+        pass="false"
+        evidence="缺少 template-selection.json"
+        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
+        return
+    fi
+    if [[ ! -f "$TEMPLATE_REGISTRY_FILE" ]]; then
+        pass="false"
+        evidence="缺少 templates/registry.json"
+        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
+        return
+    fi
+    if [[ ! -f "$DRAFT_FILE" ]]; then
+        pass="false"
+        evidence="缺少 draft.tex"
+        echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
+        return
+    fi
+
+    local result
+    result=$(python3 - <<PYEOF
+import json, re
+try:
+    with open('$TEMPLATE_SELECTION_FILE') as f:
+        sel = json.load(f)
+    with open('$TEMPLATE_REGISTRY_FILE') as f:
+        reg = json.load(f)
+    with open('$DRAFT_FILE') as f:
+        tex = f.read()
+except Exception:
+    print('false:read_error')
+    raise SystemExit(0)
+
+tid = str(sel.get('selected_template_id', '')).strip()
+if not tid:
+    print('false:missing_selected_template_id')
+    raise SystemExit(0)
+cfg = reg.get('templates', {}).get(tid)
+if not isinstance(cfg, dict):
+    print('false:template_not_found')
+    raise SystemExit(0)
+
+exp_doc = str(cfg.get('documentclass', '')).strip()
+m = re.search(r'\\documentclass(?:\[[^\]]*\])?\{([^}]+)\}', tex)
+act_doc = m.group(1).strip() if m else ''
+if exp_doc and act_doc != exp_doc:
+    print(f'false:docclass_mismatch:{exp_doc}!={act_doc}')
+    raise SystemExit(0)
+
+for mk in cfg.get('required_markers', []):
+    if str(mk) not in tex:
+        print('false:missing_marker')
+        raise SystemExit(0)
+
+print('true')
+PYEOF
+)
+
+    if [[ "$result" == "true" ]]; then
+        pass="true"
+        evidence="template-selection、registry 与 draft.tex 一致"
+    else
+        pass="false"
+        evidence="模板一致性失败: $result"
+    fi
+
+    echo '{"id":"PG-048","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
+# PG-049: hard-review 后 Vx 交付包
+pg049_eval() {
+    local pass="false"
+    local evidence=""
+
+    local gate_ok="false"
+    gate_ok=$(python3 - <<PYEOF
+import json, os
+state_dir = '$STATE_DIR'
+req = {
+  'runtime-proof.json': lambda d: int(d.get('exit_code', 1)) == 0,
+  'external-review-log.json': lambda d: str(d.get('verdict','')).lower() != 'blocking',
+  'evidence-trace.json': lambda d: isinstance(d.get('claims', []), list) and len(d.get('claims', [])) > 0,
+  'plagiarism-report.json': lambda d: str(d.get('status','')).lower() == 'success' and float(d.get('similarity_pct', 100.0)) <= 15.0,
+  'dataset-inventory.json': lambda d: isinstance(d.get('datasets', []), list) and len(d.get('datasets', [])) > 0,
+}
+ok = True
+for fn, chk in req.items():
+    fp = os.path.join(state_dir, fn)
+    if not os.path.isfile(fp):
+        ok = False
+        break
+    try:
+        with open(fp) as f:
+            d = json.load(f)
+        if not chk(d):
+            ok = False
+            break
+    except Exception:
+        ok = False
+        break
+print('true' if ok else 'false')
+PYEOF
+)
+
+    local latest_v=""
+    latest_v=$(python3 - <<PYEOF
+import os, re
+root = '$PROJECT_ROOT'
+pat = re.compile(r'^V([0-9]+)$')
+best = None
+for n in os.listdir(root):
+    m = pat.match(n)
+    if not m:
+        continue
+    i = int(m.group(1))
+    if best is None or i > best[0]:
+        best = (i, n)
+print(best[1] if best else '')
+PYEOF
+)
+
+    local vx_ok="false"
+    if [[ -n "$latest_v" ]] && [[ -d "$PROJECT_ROOT/$latest_v/code" ]] && [[ -d "$PROJECT_ROOT/$latest_v/latex" ]] && [[ -d "$PROJECT_ROOT/$latest_v/else-supports" ]]; then
+        vx_ok="true"
+    fi
+
+    local rel_ok="false"
+    rel_ok=$(python3 - <<PYEOF
+import json
+try:
+    with open('$RELEASE_STATE_FILE') as f:
+        d = json.load(f)
+    req = ['version_folder','created_at','trigger','evidence_refs']
+    ok = all(k in d for k in req)
+    print('true' if ok else 'false')
+except Exception:
+    print('false')
+PYEOF
+)
+
+    if [[ "$gate_ok" == "true" ]] && [[ "$vx_ok" == "true" ]] && [[ "$rel_ok" == "true" ]]; then
+        pass="true"
+        evidence="hard gate 全通过后 Vx 结构与 release-package 状态完整"
+    elif [[ "$gate_ok" != "true" ]]; then
+        pass="false"
+        evidence="hard gate 未全部通过，Vx 触发条件不满足"
+    elif [[ "$vx_ok" != "true" ]]; then
+        pass="false"
+        evidence="项目根目录缺少完整 Vx 交付结构（code/latex/else-supports）"
+    else
+        pass="false"
+        evidence="release-package.json 缺失或字段不完整"
+    fi
+
+    echo '{"id":"PG-049","pass":'$pass',"evidence":"'$evidence'"}'
+}
+
 main() {
     echo '{"results":['
 
     local first=true
     local result
 
-    for func in pggen001_eval pginit_eval pgpipe001_eval pg001_eval pg002_eval pg003_eval pg004_eval pg005_eval pg007_eval pg008_eval pg010_eval pg011_eval pg012_eval pg013_eval pg014_eval pg015_eval pg018_eval pg019_eval pg020_eval pg021_eval pg024_eval pg025_eval pg026_eval pg029_eval pg030_eval pg032_eval pg033_eval pgrepo_eval pg040_eval pg041_eval pg042_eval pg043_eval pg044_eval pg045_eval; do
+    for func in pggen001_eval pginit_eval pgpipe001_eval pg001_eval pg002_eval pg003_eval pg004_eval pg005_eval pg007_eval pg008_eval pg010_eval pg011_eval pg012_eval pg013_eval pg014_eval pg015_eval pg018_eval pg019_eval pg020_eval pg021_eval pg024_eval pg025_eval pg026_eval pg029_eval pg030_eval pg032_eval pg033_eval pgrepo_eval pg040_eval pg041_eval pg042_eval pg043_eval pg044_eval pg045_eval pg046_eval pg047_eval pg048_eval pg049_eval; do
         result=$("$func")
         if [[ "$first" == "true" ]]; then
             first=false

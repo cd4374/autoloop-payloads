@@ -29,3 +29,10 @@ max_iter: 3
 - domain: ai-exp, ai-theory, numerical, physics
 - min_references: 引用数门槛
 - min_recent_refs_pct: 近五年引用占比
+
+## 模板初始化约定
+
+paper-init 阶段需初始化模板选择状态，供 writing-loop 使用：
+- `.paper/state/template-selection.json`（若不存在则创建）
+- 字段最小集合：`target_venue`、`selected_template_id`、`source_of_truth`、`constraints`、`selected_at`
+- `selected_template_id` 必须可在 `writing-payload/templates/registry.json` 解析

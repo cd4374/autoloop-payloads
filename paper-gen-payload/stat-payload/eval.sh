@@ -4,45 +4,28 @@ set -euo pipefail
 # Stat Loop Evaluation Script
 # Configuration inherited from parent payload's session.md
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_SESSION="$SCRIPT_DIR/../session.md"
-
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
 CODE_DIR="${CODE_DIR:-.paper/output/code}"
+PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 
-# Load config from parent session.md
-load_config() {
-    python3 -c "
-import yaml, re, json
-with open('$PARENT_SESSION') as f:
-    content = f.read()
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    thresholds = {
-        'NeurIPS': {'min_experiment_runs': 3, 'require_ablation': True},
-        'ICML': {'min_experiment_runs': 3, 'require_ablation': True},
-        'ICLR': {'min_experiment_runs': 3, 'require_ablation': True},
-        'AAAI': {'min_experiment_runs': 3, 'require_ablation': True},
-        'Journal': {'min_experiment_runs': 5, 'require_ablation': True},
-        'Short': {'min_experiment_runs': 3, 'require_ablation': False},
-        'Letter': {'min_experiment_runs': 3, 'require_ablation': False},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
-    print(json.dumps({
-        'min_experiment_runs': t['min_experiment_runs'],
-        'require_ablation': frontmatter.get('require_ablation', t['require_ablation']),
-        'domain': frontmatter.get('domain', 'ai-exp'),
-    }))
-else:
-    print(json.dumps({'min_experiment_runs': 3, 'require_ablation': True, 'domain': 'ai-exp'}))
-"
-}
-CONFIG=$(load_config)
-MIN_RUNS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_experiment_runs'])")
-REQUIRE_ABLATION=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['require_ablation'])")
-DOMAIN=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['domain'])")
+MIN_RUNS=$(python3 -c "import json, os; p='$PAPER_TYPE_FILE'; d={};
+try:
+    d=json.load(open(p)) if os.path.isfile(p) else {}
+except Exception:
+    d={}
+print(d.get('derived_thresholds', {}).get('min_experiment_runs', 3))" 2>/dev/null || echo "3")
+REQUIRE_ABLATION=$(python3 -c "import json, os; p='$PAPER_TYPE_FILE'; d={};
+try:
+    d=json.load(open(p)) if os.path.isfile(p) else {}
+except Exception:
+    d={}
+print('True' if d.get('derived_thresholds', {}).get('require_ablation', True) else 'False')" 2>/dev/null || echo "True")
+DOMAIN=$(python3 -c "import json, os; p='$PAPER_TYPE_FILE'; d={};
+try:
+    d=json.load(open(p)) if os.path.isfile(p) else {}
+except Exception:
+    d={}
+print(d.get('paper_domain', 'ai-exp'))" 2>/dev/null || echo "ai-exp")
 
 # Cherry-picking signal words (case-insensitive)
 CHERRY_SIGNALS=(
@@ -129,7 +112,7 @@ check_cherry_picking() {
 }
 
 check_random_seed() {
-    [[ -d "$1" ]] && grep -qrE '(random\.seed|torch\.manual_seed|np\.random\.seed|set_seed|manual_seed_all|seed\()' "$1"/*.py 2>/dev/null && echo "true" || echo "false"
+    [[ -d "$1" ]] && grep -qrE '(random\.seed|torch\.(cuda\.)?manual_seed|torch\.cuda\.manual_seed_all|np\.random\.seed|numpy\.random\.seed|tf\.random\.set_seed|set_seed|manual_seed_all)' "$1"/*.py 2>/dev/null && echo "true" || echo "false"
 }
 
 check_nn_viz() {

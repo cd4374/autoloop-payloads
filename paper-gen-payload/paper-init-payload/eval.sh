@@ -15,40 +15,6 @@ OUTPUT_DIR="${OUTPUT_DIR:-$PAPER_BASE/output}"
 STATE_DIR="${STATE_DIR:-$PAPER_BASE/state}"
 INPUT_DIR="${INPUT_DIR:-$PAPER_BASE/input}"
 
-# Load config from parent session.md
-load_parent_config() {
-    python3 -c "
-import yaml, re, json
-
-with open('$PARENT_SESSION') as f:
-    content = f.read()
-
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    thresholds = {
-        'NeurIPS': {'min_references': 30, 'page_limit': 9},
-        'ICML': {'min_references': 30, 'page_limit': 8},
-        'ICLR': {'min_references': 30, 'page_limit': 8},
-        'AAAI': {'min_references': 25, 'page_limit': 8},
-        'Journal': {'min_references': 40, 'page_limit': 30},
-        'Short': {'min_references': 15, 'page_limit': 4},
-        'Letter': {'min_references': 10, 'page_limit': 2},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
-    print(json.dumps({
-        'paper_type': pt,
-        'domain': frontmatter.get('domain', 'ai-exp'),
-        'min_references': t['min_references'],
-    }))
-else:
-    print(json.dumps({'paper_type': 'NeurIPS', 'domain': 'ai-exp', 'min_references': 30}))
-"
-}
-
-CONFIG=$(load_parent_config)
-MIN_REFS=$(echo "$CONFIG" | python3 -c "import sys,json; print(json.load(sys.stdin)['min_references'])")
 
 check_file_exists() {
     [[ -f "$1" ]] && echo "true" || echo "false"
@@ -106,6 +72,30 @@ try:
     print('true')
 except Exception:
     print('false')
+"
+}
+
+check_paper_type_json() {
+    local file="$1"
+    [[ ! -f "$file" ]] && { echo "false:file_missing"; return; }
+
+    python3 -c "
+import json
+try:
+    with open('$file') as f:
+        data = json.load(f)
+    required = ['venue', 'paper_domain', 'derived_thresholds']
+    for key in required:
+        if key not in data:
+            print('false:missing:' + key)
+            exit(0)
+    thresholds = data.get('derived_thresholds', {})
+    if not isinstance(thresholds, dict) or len(thresholds) == 0:
+        print('false:empty_thresholds')
+        exit(0)
+    print('true')
+except Exception as e:
+    print('false:error:' + str(e))
 "
 }
 
@@ -192,6 +182,20 @@ main() {
         status_ev="pipeline-status.json 不存在（可选）"
     fi
     results+=("{\"id\":\"INIT-002\",\"pass\":$status_pass,\"evidence\":\"$status_ev\"}")
+
+    # INIT-003: paper-type.json initialized
+    local paper_type_pass="false"
+    local paper_type_ev=""
+    local paper_type_result
+    paper_type_result=$(check_paper_type_json "$STATE_DIR/paper-type.json")
+    if [[ "$paper_type_result" == "true" ]]; then
+        paper_type_pass="true"
+        paper_type_ev="paper-type.json 包含 venue/paper_domain/derived_thresholds"
+    else
+        paper_type_pass="false"
+        paper_type_ev="paper-type.json 缺失或字段不完整: ${paper_type_result#false:}"
+    fi
+    results+=("{\"id\":\"INIT-003\",\"pass\":$paper_type_pass,\"evidence\":\"$paper_type_ev\"}")
 
     # INIT-004: draft.tex generated
     local draft_pass="false"

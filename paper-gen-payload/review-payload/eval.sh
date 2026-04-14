@@ -4,65 +4,25 @@ set -euo pipefail
 # Review Loop Evaluation Script
 # Configuration inherited from parent payload's session.md
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PARENT_SESSION="$SCRIPT_DIR/../session.md"
-
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
 REFS_FILE="${REFS_FILE:-.paper/output/references.bib}"
-
-# Load config from parent session.md
-load_config() {
-    python3 -c "
-import yaml, re, json
-with open('$PARENT_SESSION') as f:
-    content = f.read()
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    thresholds = {
-        'NeurIPS': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-        'ICML': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-        'ICLR': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-        'AAAI': {'abstract_max_words': 200, 'min_references': 25, 'min_figures': 4, 'min_tables': 1},
-        'Journal': {'abstract_max_words': 300, 'min_references': 40, 'min_figures': 5, 'min_tables': 2},
-        'Short': {'abstract_max_words': 150, 'min_references': 15, 'min_figures': 3, 'min_tables': 1},
-        'Letter': {'abstract_max_words': 150, 'min_references': 10, 'min_figures': 2, 'min_tables': 1},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
-    print(json.dumps(t))
-else:
-    print(json.dumps({'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1}))
-"
-}
+PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
 
 python3 << 'PYEOF'
-import json, os, re, subprocess, yaml
+import json, os, re, subprocess
 
 DRAFT_FILE = os.environ.get('DRAFT_FILE', '.paper/output/draft.tex')
 REFS_FILE = os.environ.get('REFS_FILE', '.paper/output/references.bib')
-PARENT_SESSION = os.environ.get('PARENT_SESSION', '.paper-gen-payload/session.md')
+PAPER_TYPE_FILE = os.environ.get('PAPER_TYPE_FILE', '.paper/state/paper-type.json')
 
 results = []
 
 def get_threshold(key, default):
     try:
-        with open(PARENT_SESSION) as f:
-            content = f.read()
-        match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-        if match:
-            fm = yaml.safe_load(match.group(1))
-            thresholds = {
-                'NeurIPS': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-                'ICML': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-                'ICLR': {'abstract_max_words': 250, 'min_references': 30, 'min_figures': 5, 'min_tables': 1},
-                'AAAI': {'abstract_max_words': 200, 'min_references': 25, 'min_figures': 4, 'min_tables': 1},
-                'Journal': {'abstract_max_words': 300, 'min_references': 40, 'min_figures': 5, 'min_tables': 2},
-                'Short': {'abstract_max_words': 150, 'min_references': 15, 'min_figures': 3, 'min_tables': 1},
-                'Letter': {'abstract_max_words': 150, 'min_references': 10, 'min_figures': 2, 'min_tables': 1},
-            }
-            pt = fm.get('paper_type', 'NeurIPS')
-            return thresholds.get(pt, thresholds['NeurIPS']).get(key, default)
+        if os.path.isfile(PAPER_TYPE_FILE):
+            with open(PAPER_TYPE_FILE) as f:
+                pt = json.load(f)
+            return pt.get('derived_thresholds', {}).get(key, default)
     except Exception:
         pass
     return default

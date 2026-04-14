@@ -9,35 +9,8 @@ PARENT_SESSION="$SCRIPT_DIR/../session.md"
 
 REFS_FILE="${REFS_FILE:-.paper/output/references.bib}"
 DRAFT_FILE="${DRAFT_FILE:-.paper/output/draft.tex}"
-
-# Load config from parent session.md
-load_config() {
-    python3 -c "
-import yaml, re, json
-with open('$PARENT_SESSION') as f:
-    content = f.read()
-match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-if match:
-    frontmatter = yaml.safe_load(match.group(1))
-    thresholds = {
-        'NeurIPS': {'min_references': 30},
-        'ICML': {'min_references': 30},
-        'ICLR': {'min_references': 30},
-        'AAAI': {'min_references': 25},
-        'Journal': {'min_references': 40},
-        'Short': {'min_references': 15},
-        'Letter': {'min_references': 10},
-    }
-    pt = frontmatter.get('paper_type', 'NeurIPS')
-    t = thresholds.get(pt, thresholds['NeurIPS'])
-    print(json.dumps({
-        'min_references': t['min_references'],
-        'min_recent_refs_pct': frontmatter.get('min_recent_refs_pct', 30),
-    }))
-else:
-    print(json.dumps({'min_references': 30, 'min_recent_refs_pct': 30}))
-"
-}
+PAPER_TYPE_FILE="${PAPER_TYPE_FILE:-.paper/state/paper-type.json}"
+CITATION_CARDS_DIR="${CITATION_CARDS_DIR:-.paper/output/citation-cards}"
 
 # Network timeout for HTTP checks (seconds)
 HTTP_TIMEOUT="${HTTP_TIMEOUT:-10}"
@@ -135,6 +108,7 @@ verify_doi_accessibility() {
 }
 
 # Helper: verify arXiv ID accessibility (Layer 2)
+# Prefer PDF page over abstract page — abstract page always 200 even for non-existent IDs.
 verify_arxiv_accessibility() {
     local arxiv="$1"
     [[ -z "$arxiv" ]] && { echo "skip"; return; }
@@ -143,12 +117,23 @@ verify_arxiv_accessibility() {
     arxiv="${arxiv#arxiv:}"
     arxiv=$(echo "$arxiv" | tr -d ' ')
 
-    local url="https://arxiv.org/abs/$arxiv"
+    # Try PDF first (more reliable — non-existent IDs return 404)
+    local pdf_url="https://arxiv.org/pdf/${arxiv}.pdf"
     local status
-    status=$(curl -sL -o /dev/null -w "%{http_code}" --max-time "$HTTP_TIMEOUT" "$url" 2>/dev/null || echo "000")
+    status=$(curl -sL -o /dev/null -w "%{http_code}" --max-time "$HTTP_TIMEOUT" "$pdf_url" 2>/dev/null || echo "000")
 
     case "$status" in
         200) echo "pass" ;;
+        404)
+            # Fallback to abstract page for versioned IDs like 2301.00001v2
+            local abs_url="https://arxiv.org/abs/${arxiv}"
+            status=$(curl -sL -o /dev/null -w "%{http_code}" --max-time "$HTTP_TIMEOUT" "$abs_url" 2>/dev/null || echo "000")
+            case "$status" in
+                200) echo "pass" ;;
+                000) echo "timeout" ;;
+                *) echo "fail:$status" ;;
+            esac
+            ;;
         000) echo "timeout" ;;
         *) echo "fail:$status" ;;
     esac
@@ -339,6 +324,84 @@ except Exception:
 " 2>/dev/null || echo "true"
 }
 
+# Helper: check citation card -> bib mapping (CITE-009)
+check_card_bib_mapping() {
+    local cards_dir="$1"
+    local bib_file="$2"
+    [[ ! -d "$cards_dir" ]] && { echo "0:0:0"; return; }
+    [[ ! -f "$bib_file" ]] && { echo "0:0:0"; return; }
+
+    python3 -c "
+import os, re
+
+cards_dir = '$cards_dir'
+bib_file = '$bib_file'
+
+with open(bib_file) as f:
+    bib = f.read()
+
+bib_keys = set(k.strip() for k in re.findall(r'^@\\w+\\{([^,]+)', bib, re.MULTILINE))
+dois = set()
+arxiv_ids = set()
+for d in re.findall(r'doi\\s*=\\s*[\"{\']([^\"}\']+)[\"}\']', bib, re.IGNORECASE):
+    v = d.strip().rstrip(',').rstrip(';').lower()
+    v = v.replace('https://doi.org/', '').replace('http://doi.org/', '').replace('doi:', '')
+    dois.add(v)
+for a in re.findall(r'(?:eprint|arxiv)\\s*=\\s*[\"{\']([^\"}\']+)[\"}\']', bib, re.IGNORECASE):
+    v = a.strip().rstrip(',').rstrip(';').lower()
+    v = v.replace('arxiv:', '').replace('arxiv', '').replace(' ', '')
+    arxiv_ids.add(v)
+
+card_files = [fn for fn in os.listdir(cards_dir) if fn.lower().endswith('.md') and os.path.isfile(os.path.join(cards_dir, fn))]
+total = len(card_files)
+mapped = 0
+
+for fn in card_files:
+    fp = os.path.join(cards_dir, fn)
+    try:
+        with open(fp) as f:
+            text = f.read()
+    except Exception:
+        continue
+
+    text_l = text.lower()
+    ok = False
+
+    # 1) Bib key via explicit field or generic @key mention
+    m = re.search(r'(?im)^\\s*bibliography\\s*:\\s*(.+)$', text)
+    if m:
+        cand = m.group(1).strip()
+        cand = cand.replace('@', '').split()[0].strip('[](){}')
+        if cand in bib_keys:
+            ok = True
+    if not ok:
+        for k in bib_keys:
+            if ('@' + k.lower()) in text_l:
+                ok = True
+                break
+
+    # 2) DOI match
+    if not ok:
+        for d in dois:
+            if d and d in text_l:
+                ok = True
+                break
+
+    # 3) arXiv match
+    if not ok:
+        arx = re.findall(r'(?:arxiv[:\\s]*)([0-9]{4}\\.[0-9]{4,5}(?:v[0-9]+)?)', text_l)
+        for a in arx:
+            if a.replace(' ', '') in arxiv_ids:
+                ok = True
+                break
+
+    if ok:
+        mapped += 1
+
+print(f'{mapped}:{total}:{total - mapped}')
+" 2>/dev/null || echo "0:0:0"
+}
+
 main() {
     local l1_pass="false"
     local l2_pass="false"
@@ -347,6 +410,7 @@ main() {
     local recent_pass="false"
     local link_pass="false"
     local style_pass="false"
+    local card_map_pass="false"
     local l1_ev=""
     local l2_ev=""
     local l3_ev=""
@@ -354,6 +418,7 @@ main() {
     local recent_ev=""
     local link_ev=""
     local style_ev=""
+    local card_map_ev=""
 
     # CITE-001: Layer 1 - BibTeX field completeness
     if [[ -f "$REFS_FILE" ]]; then
@@ -478,11 +543,11 @@ main() {
     fi
 
     # CITE-004: Citation count
-    if [[ -f "$REFS_FILE" ]] && [[ -f "$PAPER_TYPE" ]]; then
+    if [[ -f "$REFS_FILE" ]] && [[ -f "$PAPER_TYPE_FILE" ]]; then
         local count
         count=$(count_bib_entries "$REFS_FILE")
         local min
-        min=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE')); print(d.get('derived_thresholds', {}).get('min_references', 30))" 2>/dev/null || echo "30")
+        min=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE_FILE')); print(d.get('derived_thresholds', {}).get('min_references', 30))" 2>/dev/null || echo "30")
 
         if [[ "$count" -ge "$min" ]]; then
             count_pass="true"
@@ -522,19 +587,17 @@ main() {
                 awk -v cutoff="$cutoff" '$1 >= cutoff {count++} END {print count+0}')
         fi
 
-        local pct=0
-        if [[ "$total_refs" -gt 0 ]]; then
-            pct=$((recent_count * 100 / total_refs))
-        fi
+        local pct
+        pct=$(python3 -c "print(round($recent_count * 100 / $total_refs, 1))" 2>/dev/null || echo "0")
 
         local exempt="false"
-        if [[ -f "$PAPER_TYPE" ]]; then
-            exempt=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE')); print('true' if d.get('exemptions', {}).get('recent_refs_pct_exempt', False) else 'false')" 2>/dev/null || echo "false")
+        if [[ -f "$PAPER_TYPE_FILE" ]]; then
+            exempt=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE_FILE')); print('true' if d.get('exemptions', {}).get('recent_refs_pct_exempt', False) else 'false')" 2>/dev/null || echo "false")
         fi
 
         local min_pct="30"
-        if [[ -f "$PAPER_TYPE" ]]; then
-            min_pct=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE')); print(d.get('derived_thresholds', {}).get('min_recent_refs_pct', 30))" 2>/dev/null || echo "30")
+        if [[ -f "$PAPER_TYPE_FILE" ]]; then
+            min_pct=$(python3 -c "import json; d=json.load(open('$PAPER_TYPE_FILE')); print(d.get('derived_thresholds', {}).get('min_recent_refs_pct', 30))" 2>/dev/null || echo "30")
         fi
 
         if [[ "$exempt" == "true" ]]; then
@@ -581,6 +644,29 @@ main() {
         style_ev="检测到 BibTeX 格式混用"
     fi
 
+    # CITE-009: citation card ↔ bib mapping
+    if [[ -d "$CITATION_CARDS_DIR" ]] && [[ -f "$REFS_FILE" ]]; then
+        local map_result
+        map_result=$(check_card_bib_mapping "$CITATION_CARDS_DIR" "$REFS_FILE")
+        local mapped="${map_result%%:*}"
+        local tail="${map_result#*:}"
+        local total="${tail%%:*}"
+        local missing="${map_result##*:}"
+        if [[ "$total" -gt 0 ]] && [[ "$mapped" -eq "$total" ]]; then
+            card_map_pass="true"
+            card_map_ev="全部 $total 个 citation cards 可映射到 references.bib"
+        elif [[ "$total" -gt 0 ]]; then
+            card_map_pass="false"
+            card_map_ev="$missing/$total 个 citation cards 缺少 bib key/DOI/arXiv 映射"
+        else
+            card_map_pass="false"
+            card_map_ev="citation-cards 目录为空或 references.bib 不存在"
+        fi
+    else
+        card_map_pass="false"
+        card_map_ev="缺少 citation-cards 目录或 references.bib"
+    fi
+
     printf '%s\n' '{"results":['
     printf '%s\n' "{\"id\":\"CITE-001\",\"pass\":$l1_pass,\"evidence\":\"$l1_ev\"}"
     printf ',%s\n' "{\"id\":\"CITE-002\",\"pass\":$l2_pass,\"evidence\":\"$l2_ev\"}"
@@ -589,6 +675,7 @@ main() {
     printf ',%s\n' "{\"id\":\"CITE-005\",\"pass\":$recent_pass,\"evidence\":\"$recent_ev\"}"
     printf ',%s\n' "{\"id\":\"CITE-008\",\"pass\":$link_pass,\"evidence\":\"$link_ev\"}"
     printf ',%s\n' "{\"id\":\"CITE-007\",\"pass\":$style_pass,\"evidence\":\"$style_ev\"}"
+    printf ',%s\n' "{\"id\":\"CITE-009\",\"pass\":$card_map_pass,\"evidence\":\"$card_map_ev\"}"
     printf '%s\n' ']}'
 }
 

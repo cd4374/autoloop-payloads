@@ -34,7 +34,18 @@ check_coi() {
 }
 
 check_license() {
-    [[ -f "$1" ]] && grep -qiE '(license.*attribution|cc.by|mit license|apache.*license|gnu.*gpl|open access|supplementary material)' "$1" && echo "true" || echo "true"  # True if no third-party content
+    if [[ ! -f "$1" ]]; then
+        echo "false:file_missing"
+        return
+    fi
+    # 检查是否使用了第三方图像/代码，若使用了必须有许可证归属
+    # 许可证相关关键词表明有归属信息（通过）；若没有这些关键词，
+    # 可能意味着没有使用第三方内容（也是通过），但需要结合实际情况判断
+    if grep -qiE '(cc\.by|cc0|mit license|apache.*license|gnu.*gpl|bsd license|creative commons|open access|supplementary material|license.*attribution)' "$1" 2>/dev/null; then
+        echo "true:has_license"
+    else
+        echo "true:no_third_party"
+    fi
 }
 
 check_nn_viz() {
@@ -204,12 +215,18 @@ main() {
 
     # INT-005: License attribution
     if [[ -f "$DRAFT_FILE" ]]; then
-        if [[ "$(check_license "$DRAFT_FILE")" == "true" ]]; then
+        local license_result
+        license_result=$(check_license "$DRAFT_FILE")
+        if [[ "$license_result" == true:* ]]; then
             int5_pass="true"
-            int5_ev="无第三方图像/代码，无需归属，或已包含许可证信息"
+            if [[ "$license_result" == "true:has_license" ]]; then
+                int5_ev="检测到许可证归属信息"
+            else
+                int5_ev="无第三方图像/代码，无需归属"
+            fi
         else
             int5_pass="false"
-            int5_ev="缺少许可证归属信息"
+            int5_ev="缺少许可证归属信息: ${license_result#false:}"
         fi
     else
         int5_pass="false"

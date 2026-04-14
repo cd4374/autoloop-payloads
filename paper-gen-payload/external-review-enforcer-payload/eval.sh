@@ -62,12 +62,13 @@ with open('$REVIEW_LOG_FILE') as f:
 PYEOF
 )
 
-    if [[ ! "$model" =~ ^(local|self|internal|same-model)$ ]] && [[ "$verdict" != "blocking" ]]; then
+    # model 必须非空且不是自审占位，verdict 不能是 blocking
+    if [[ -n "$model" ]] && [[ ! "$model" =~ ^(local|self|internal|same-model)$ ]] && [[ "$verdict" != "blocking" ]]; then
       p3="true"
       e3="外部模型审查有效且 verdict 非 blocking"
     else
       p3="false"
-      e3="外部审查不满足要求（model=$model, verdict=$verdict）"
+      e3="外部审查不满足要求（model=[$model], verdict=[$verdict]）"
     fi
   else
     p3="false"

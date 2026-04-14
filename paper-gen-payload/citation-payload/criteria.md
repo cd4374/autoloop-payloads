@@ -58,3 +58,11 @@
   depends_on: ["CITE-001"]
   pass_condition: "references.bib 中每个条目在 draft.tex 中有 \\cite{} 使用。无未使用的孤立条目。"
   fix_hint: "清理未使用引用或补充正文引用。"
+
+- id: CITE-009
+  title: citation card 与 bib 映射完整
+  severity: blocking
+  evaluator: script
+  depends_on: ["CITE-001"]
+  pass_condition: "`.paper/output/citation-cards/*.md` 中每个卡片都能映射到 references.bib 的条目（通过 bib key、DOI 或 arXiv 任一）。"
+  fix_hint: "在 citation card 中补充 `Bibliography` 字段，包含 bib key/DOI/arXiv 至少一项。"
