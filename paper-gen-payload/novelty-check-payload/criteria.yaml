@@ -1,0 +1,57 @@
+rules:
+  - id: NC-001
+    title: novelty-report.json 生成
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/novelty-report.json 存在且包含 overall_assessment、overall_score 字段。"
+    fix_hint: "运行多源文献搜索，调用 LLM 生成 novelty 报告，写入 novelty-report.json。"
+    check:
+      type: json_fields
+      file: .paper/state/novelty-report.json
+      fields:
+        - name: overall_assessment
+          types: [string]
+        - name: overall_score
+          types: [number]
+
+  - id: NC-002
+    title: 新颖性评分达标
+    severity: blocking
+    evaluator: script
+    depends_on: ["NC-001"]
+    pass_condition: "novelty-report.json 的 overall_score >= 5（满分 10），且 overall_assessment != 'ABANDON'。"
+    fix_hint: "如果 overall_score < 5 或 overall_assessment == ABANDON，该 idea 需放弃或大幅调整方向。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: novelty-report.json
+          conditions:
+            - path: $.overall_score
+              op: ge
+              value: 5
+            - path: $.overall_assessment
+              op: not_eq
+              value: ABANDON
+
+  - id: NC-003
+    title: 核心主张差异化
+    severity: blocking
+    evaluator: llm
+    depends_on: ["NC-002"]
+    pass_condition: "core_claims 数组中 >= 1 个主张的 novelty 为 HIGH 或 MEDIUM，且有明确的 closest_prior。"
+    fix_hint: "如果所有核心主张 novelty 均为 LOW，需重新审视 idea 的差异化方向。"
+
+  - id: NC-004
+    title: novelty-report.md 生成
+    severity: advisory
+    evaluator: script
+    depends_on: ["NC-001"]
+    pass_condition: ".paper/output/novelty-report.md 存在且包含核心主张、最接近先工作、差异化描述。"
+    fix_hint: "将 novelty-report.json 转换为可读的 Markdown 摘要。"
+    check:
+      type: json_fields
+      file: .paper/output/novelty-report.md
+      fields:
+        - name: overall_assessment
+          types: [string]

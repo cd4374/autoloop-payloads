@@ -1,0 +1,78 @@
+rules:
+  - id: RC-001
+    title: research-contract.md 生成
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/input/research-contract.md 存在且非空（字符数 >= 500）。"
+    fix_hint: "根据 idea.md 和 novelty-report.json 生成 research-contract.md，包含所有必需章节。"
+    check:
+      type: files_exist
+      files:
+        - .paper/input/research-contract.md
+
+  - id: RC-002
+    title: 核心主张完整
+    severity: blocking
+    evaluator: script
+    depends_on: ["RC-001"]
+    pass_condition: "research-contract.md 包含 '## Core Claims' 或 '## Selected Idea' 章节，且有 >= 1 条主张描述。"
+    fix_hint: "在 research-contract.md 中添加 Core Claims 章节，列出主要和支撑主张。"
+    check:
+      type: regex_any
+      file: .paper/input/research-contract.md
+      patterns:
+        - '## Core Claims'
+        - '## Selected Idea'
+        - '## Idea'
+
+  - id: RC-003
+    title: 方法摘要可操作
+    severity: blocking
+    evaluator: script
+    depends_on: ["RC-001"]
+    pass_condition: "research-contract.md 包含 '## Method Summary' 或 '## Method' 章节。"
+    fix_hint: "在 research-contract.md 中添加 Method Summary 章节（2-3 段），描述方法原理。"
+    check:
+      type: regex_any
+      file: .paper/input/research-contract.md
+      patterns:
+        - '## Method Summary'
+        - '## Method'
+
+  - id: RC-004
+    title: Baseline 表非空
+    severity: blocking
+    evaluator: script
+    depends_on: ["RC-001"]
+    pass_condition: "research-contract.md 包含 Baselines 表格（含 | Method | 关键字）且有 >= 1 行数据。"
+    fix_hint: "添加 Baselines 表格，列出已有基线方法、数据集、指标和分数。"
+    check:
+      type: regex_all
+      file: .paper/input/research-contract.md
+      patterns:
+        - '## Baselines'
+        - '| Method'
+        - '| Dataset'
+        - '| Metric'
+
+  - id: RC-005
+    title: 实验设计完整
+    severity: blocking
+    evaluator: script
+    depends_on: ["RC-001"]
+    pass_condition: "research-contract.md 包含 '## Experiment Design' 或 '## Experiment' 章节，提及数据集、基线和指标。"
+    fix_hint: "添加 Experiment Design 章节，说明数据集、基线、指标、计算预算。"
+    check:
+      type: regex_any
+      file: .paper/input/research-contract.md
+      patterns:
+        - '## Experiment Design'
+        - '## Experiment'
+
+  - id: RC-006
+    title: 研究契约语义完整（LLM）
+    severity: advisory
+    evaluator: llm
+    depends_on: ["RC-001", "RC-002", "RC-003", "RC-004", "RC-005"]
+    pass_condition: "research-contract.md 各章节内容具体、逻辑清晰。Method Summary 描述足以让后续 agent 独立推进。Baseline 表格有来源标注。"
+    fix_hint: "完善 research-contract.md 各章节内容，确保下游 agent 可独立工作。"

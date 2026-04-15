@@ -1,0 +1,40 @@
+rules:
+  - id: RTC-001
+    title: claim-verdict.json 生成
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/claim_verdict.json 存在且包含 verdict 字段。"
+    fix_hint: "收集实验结果，对照 research-contract.md 中的 Core Claims，调用 LLM 判定，写入 claim_verdict.json。"
+    check:
+      type: json_fields
+      file: .paper/state/claim_verdict.json
+      fields:
+        - name: verdict
+          types: [string]
+        - name: claims
+          types: [list]
+
+  - id: RTC-002
+    title: 主张判定门控
+    severity: blocking
+    evaluator: script
+    depends_on: ["RTC-001"]
+    pass_condition: "claim_verdict.json.verdict == 'yes' 或 'partial'（允许继续）；若 verdict == 'no' 则 .paper/state/idea-candidates.json 的 killed 区域已更新。"
+    fix_hint: "若 verdict == 'no'：标记 idea 为 killed，更新 idea-candidates.json，切至下一候选 idea。若 verdict == 'partial'：补充缺失实验。"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: claim_verdict.json
+          conditions:
+            - path: $.verdict
+              op: not_eq
+              value: no
+
+  - id: RTC-003
+    title: 主张判定 LLM 合理性
+    severity: advisory
+    evaluator: llm
+    depends_on: ["RTC-001", "RTC-002"]
+    pass_condition: "判定内容合理：1) 支撑依据与日志数据一致；2) missing_evidence 描述具体；3) partial 情况下 next_experiments_needed 可操作。"
+    fix_hint: "如判定内容不合理，重新运行 result-to-claim-payload，提供更完整的实验日志。"

@@ -1,0 +1,28 @@
+{
+  "idea_id": "auto-generated-from-idea-md",
+  "timestamp": "ISO-8601",
+  "idea_summary": "One-line summary of the idea",
+  "core_claims": [
+    {
+      "claim": "...",
+      "novelty": "HIGH|MEDIUM|LOW",
+      "closest_prior": "Paper Title, Venue Year",
+      "key_difference": "..."
+    }
+  ],
+  "closest_prior_work": [
+    {
+      "paper": "Title",
+      "year": 2025,
+      "venue": "ICLR",
+      "overlap": "METHOD|PROBLEM|SETTING|ALL",
+      "key_difference": "..."
+    }
+  ],
+  "overall_score": 7,
+  "overall_assessment": "PROCEED|PROCEED_WITH_CAUTION|ABANDON",
+  "key_differentiator": "...",
+  "reviewer_risk": "...",
+  "search_sources": ["arxiv", "iclr2025", "neurips2025", "semantic_scholar"],
+  "literature_review_summary": "..."
+}

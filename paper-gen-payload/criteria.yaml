@@ -1,5 +1,26 @@
 rules:
-  # ── P0 Blocking (PG-G01~G06) ───────────────────────────────────────────────
+  # ── P0 Blocking (PG-G00~G06) ───────────────────────────────────────────────
+
+  - id: PG-G00
+    title: 研究想法实质评估通过
+    severity: blocking
+    evaluator: script
+    pass_condition: ".paper/state/idea-candidates.json 存在且 active_idea.novelty_score >= 5 且 active_idea.assessment != 'ABANDON'。"
+    fix_hint: "运行 idea-loop（内嵌 novelty-check + research-contract），生成 idea-candidates.json 和 novelty-report.json。"
+    fix_skill: loop-run
+    fix_skill_args: "PAYLOAD=paper-gen-payload/idea-payload"
+    check:
+      type: json_gates
+      state_dir: .paper/state
+      gates:
+        - file: idea-candidates.json
+          conditions:
+            - path: $.active_idea.novelty_score
+              op: ge
+              value: 5
+            - path: $.active_idea.assessment
+              op: not_eq
+              value: ABANDON
 
   - id: PG-G01
     title: PDF 生成

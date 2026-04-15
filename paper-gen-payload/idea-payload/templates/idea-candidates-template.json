@@ -1,0 +1,16 @@
+{
+  "_template": true,
+  "_description": "候选 idea 池状态文件。IDEA-006 由 agent 填充，非预生成。",
+  "active_idea": {
+    "id": "idea-001",
+    "idea_md": ".paper/input/idea.md",
+    "novelty_score": null,
+    "assessment": null,
+    "selected_at": "ISO-8601",
+    "novelty_report": ".paper/state/novelty-report.json",
+    "research_contract": ".paper/input/research-contract.md"
+  },
+  "candidates": [],
+  "killed": [],
+  "switch_log": []
+}
