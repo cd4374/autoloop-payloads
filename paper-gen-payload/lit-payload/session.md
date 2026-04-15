@@ -31,3 +31,9 @@ max_iter: 2
 - `.paper/state/lit-status.json`: 文献综述状态
 - `.paper/state/lit-corpus-index.json`: 文献语料索引（downloaded/manual/path/title/doi/arxiv 等）
 - `.paper/output/citation-cards/`: 引文卡片（仅 `.md`）
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'lit-loop 准备就绪，等待基座评估 criteria...'"

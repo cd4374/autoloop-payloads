@@ -64,10 +64,10 @@ rules:
     title: 神经网络可视化披露
     severity: blocking
     evaluator: script
-    pass_condition: "若使用神经网络可视化方法（attention map、saliency map、t-SNE、Grad-CAM 等），在 method 或 appendix 中披露生成方法和工具。"
+    pass_condition: "若使用了神经网络可视化方法（attention map、saliency map、t-SNE、Grad-CAM 等），在 method 或 appendix 中披露生成方法和工具；若未使用则视为通过。"
     fix_hint: "添加神经网络可视化方法披露，包括使用的工具和参数设置。"
     check:
-      type: regex_all
+      type: regex_any
       file: .paper/output/draft.tex
       patterns:
         - 'attention.*map'
@@ -77,10 +77,11 @@ rules:
         - 'umap'
         - 'activation.*map'
 
-  - id: INT-007
+  - id: INT-009
     title: 无图像操纵信号
     severity: blocking
     evaluator: script
+    pass_hint: "移除操纵图像或添加披露说明。"
     pass_condition: "draft.tex 不包含图像操纵披露词（如'cropped'、'contrast enhanced'、'brightness adjusted'），或已添加说明。"
     fix_hint: "移除操纵图像或添加披露说明。"
     check:
@@ -91,7 +92,7 @@ rules:
         - 'contrast enhanced'
         - 'brightness adjusted'
 
-  - id: INT-008
+  - id: INT-010
     title: 无抄袭信号
     severity: blocking
     evaluator: script

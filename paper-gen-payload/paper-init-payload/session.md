@@ -37,3 +37,9 @@ paper-init 阶段需初始化模板选择状态，供 writing-loop 使用：
 - `.paper/state/template-selection.json`（若不存在则创建）
 - 字段最小集合：`target_venue`、`selected_template_id`、`source_of_truth`、`constraints`、`selected_at`
 - `selected_template_id` 必须可在 `writing-payload/templates/registry.json` 解析
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'paper-init 准备就绪，等待基座评估 criteria...'"

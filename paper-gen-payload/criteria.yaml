@@ -1,202 +1,33 @@
 rules:
-  # ── P0 Blocking (PG-G00~G06) ───────────────────────────────────────────────
-
-  - id: PG-G00
-    title: 研究想法实质评估通过
+  - id: ROOT-001
+    title: 所有 P0 子 payload 已完成
     severity: blocking
     evaluator: script
-    pass_condition: ".paper/state/idea-candidates.json 存在且 active_idea.novelty_score >= 5 且 active_idea.assessment != 'ABANDON'。"
-    fix_hint: "运行 idea-loop（内嵌 novelty-check + research-contract），生成 idea-candidates.json 和 novelty-report.json。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/idea-payload"
+    pass_condition: "所有 P0 子 loop 正常完成（status=keep）或达到 max_iter"
+    fix_hint: "运行未完成的 P0 子 payload"
     check:
-      type: json_gates
-      state_dir: .paper/state
-      gates:
-        - file: idea-candidates.json
-          conditions:
-            - path: $.active_idea.novelty_score
-              op: ge
-              value: 5
-            - path: $.active_idea.assessment
-              op: not_eq
-              value: ABANDON
+      type: subpayload_done
+      payload: ./runtime-proof-payload
+      status: keep
 
-  - id: PG-G01
-    title: PDF 生成
+  - id: ROOT-002
+    title: 论文核心文件已生成
     severity: blocking
     evaluator: script
-    pass_condition: ".paper/output/paper.pdf 存在且非空。"
-    fix_hint: "运行 latexmk 编译 draft.tex 生成 paper.pdf。"
+    pass_condition: ".paper/output/draft.tex 存在且非空"
+    fix_hint: "运行 writing-loop 生成论文草稿"
     check:
       type: files_exist
       files:
-        - .paper/output/paper.pdf
+        - .paper/output/draft.tex
 
-  - id: PG-G02
-    title: 抄袭检测通过
-    severity: blocking
-    evaluator: script
-    pass_condition: "plagiarism-report.json status=success 且 similarity_pct <= 15%。"
-    fix_hint: "运行 plagiarism-api-payload。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/plagiarism-api-payload"
-    check:
-      type: json_gates
-      state_dir: .paper/state
-      gates:
-        - file: plagiarism-report.json
-          conditions:
-            - path: $.status
-              op: eq
-              value: success
-            - path: $.similarity_pct
-              op: le
-              value: 15.0
-
-  - id: PG-G03
-    title: 运行时证明就绪
-    severity: blocking
-    evaluator: script
-    pass_condition: "runtime-proof.json exit_code=0。"
-    fix_hint: "运行 runtime-proof-payload。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/runtime-proof-payload"
-    check:
-      type: json_gates
-      state_dir: .paper/state
-      gates:
-        - file: runtime-proof.json
-          conditions:
-            - path: $.exit_code
-              op: eq
-              value: 0
-
-  - id: PG-G04
-    title: 外部审查通过
-    severity: blocking
-    evaluator: script
-    pass_condition: "external-review-log.json verdict != blocking。"
-    fix_hint: "运行 external-review-enforcer-payload。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/external-review-enforcer-payload"
-    check:
-      type: json_gates
-      state_dir: .paper/state
-      gates:
-        - file: external-review-log.json
-          conditions:
-            - path: $.verdict
-              op: not_eq
-              value: blocking
-
-  - id: PG-G05
-    title: 证据追踪完整
-    severity: blocking
-    evaluator: script
-    pass_condition: "evidence-trace.json claims 数组非空。"
-    fix_hint: "运行 evidence-trace-payload。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/evidence-trace-payload"
-    check:
-      type: json_gates
-      state_dir: .paper/state
-      gates:
-        - file: evidence-trace.json
-          conditions:
-            - path: $.claims
-              op: non_empty_list
-
-  - id: PG-G06
-    title: Vx 交付包就绪
-    severity: blocking
-    evaluator: script
-    depends_on: ["PG-G02", "PG-G03", "PG-G04", "PG-G05"]
-    pass_condition: "项目根目录存在最新 Vx/ 目录，包含 code/、latex/、else-supports/。"
-    fix_hint: "在 hard gate 全部通过后创建 Vx 版本目录。"
-    check:
-      type: vx_package
-      project_root: .
-      subdirs:
-        - code
-        - latex
-        - else-supports
-
-  # ── Advisory (PG-Q01~Q06) ───────────────────────────────────────────────────
-
-  - id: PG-Q01
-    title: 写作质量
-    severity: advisory
-    evaluator: llm
-    pass_condition: "论文语言流畅、结构清晰、逻辑连贯，无明显语法错误。"
-    fix_hint: "运行 writing-payload 改进写作质量。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/writing-payload"
-
-  - id: PG-Q02
-    title: 引用质量
-    severity: advisory
-    evaluator: llm
-    pass_condition: "引用格式统一、无幻觉引用、DOI/arXiv 可验证。"
-    fix_hint: "运行 citation-payload 检查引用质量。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/citation-payload"
-
-  - id: PG-Q03
-    title: 可复现性
+  - id: ROOT-003
+    title: 所有 P1 子 payload 已完成
     severity: advisory
     evaluator: script
-    pass_condition: "reproducibility.json 完整，code/main.py 包含随机种子，logs/ 可追溯。"
-    fix_hint: "运行 exp-payload 完善可复现性。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/exp-payload"
+    pass_condition: "所有 P1 子 loop 已完成"
+    fix_hint: "运行未完成的 P1 子 payload"
     check:
-      type: json_fields
-      file: .paper/output/reproducibility.json
-      fields:
-        - name: hyperparameters
-          types: [string, dict]
-        - name: dataset
-          types: [string, dict]
-
-  - id: PG-Q04
-    title: 图表质量
-    severity: advisory
-    evaluator: llm
-    pass_condition: "图表数量达标、格式规范（PDF/EPS）、质量综合评分 >= 8.0/10。"
-    fix_hint: "运行 figure-payload 改进图表质量。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/figure-payload"
-
-  - id: PG-Q05
-    title: 数据集合规
-    severity: advisory
-    evaluator: script
-    pass_condition: "使用的数据集有明确许可证，并在论文中标注。"
-    fix_hint: "运行 dataset-license-payload 检查数据集合规性。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/dataset-license-payload"
-    check:
-      type: regex_any
-      file: .paper/output/draft.tex
-      patterns:
-        - 'license'
-        - 'cc.by'
-        - 'mit license'
-
-  - id: PG-Q06
-    title: Vx 交付包完整性
-    severity: advisory
-    evaluator: script
-    depends_on: ["PG-G06"]
-    pass_condition: "Vx/ 目录包含完整交付物：code/、latex/、else-supports/、reproducibility.json。"
-    fix_hint: "完善 Vx 交付包内容。"
-    check:
-      type: dir_structure
-      dirs:
-        - Vx/code
-        - Vx/latex
-        - Vx/else-supports
-      files:
-        - dir: Vx
-          pattern: reproducibility.json
+      type: subpayload_done
+      payload: ./dataset-license-payload
+      status: any

@@ -103,3 +103,17 @@ payload 目录内的 `.paper/input/idea.md` 定义研究想法。若不存在，
 - reviewer agents 只读不写
 - 所有数字来自真实运行
 - result-to-claim verdict == no 时，必须将 idea 标记到 killed 区域并切换候选
+
+## Actions
+
+### Step 1: 判断是否完成
+- action: if
+  condition: "json_path:.loop:results.jsonl:last/blocking_fail eq 0"
+  then:
+    - action: write
+      file: .loop/done
+      content: "完成\n"
+  else:
+    - action: skill
+      skill: loop-run
+      args: "PAYLOAD=. RESUME"

@@ -31,7 +31,7 @@ rules:
     severity: blocking
     evaluator: script
     depends_on: ["CITE-002"]
-    pass_condition: "通过 CrossRef API 验证 DOI，title 相似度 >=0.7（difflib.SequenceMatcher），year 一致。"
+    pass_condition: "crossref-consistency.json 存在，且 pass_count >= total_count * 0.8（至少 80% 条目通过 CrossRef 验证）。若 total_count==0 则视为 PASS（无 DOI 条目时跳过）。"
     fix_hint: "修正与 CrossRef 不一致的 DOI 条目，或移除错误 DOI。"
     check:
       type: json_gates

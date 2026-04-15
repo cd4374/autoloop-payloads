@@ -15,3 +15,9 @@ max_iter: 2
 ## 状态输出
 
 - `.paper/state/dataset-inventory.json`
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'dataset-license-loop 准备就绪，等待基座评估 criteria...'"

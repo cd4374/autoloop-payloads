@@ -37,3 +37,9 @@ max_iter: 4
 
 - `.paper/state/review-status.json`: 当前评分和 blocking issues
 - `.paper/loop-logs/review-round-{N}.json`: 各轮次审查结果
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'review-loop 准备就绪，等待基座评估 criteria...'"

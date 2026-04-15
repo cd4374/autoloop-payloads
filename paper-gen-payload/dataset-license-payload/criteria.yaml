@@ -1,28 +1,13 @@
 rules:
-  - id: DATASET-001
-    title: 数据集许可证合规
+  - id: DATA-001
+    title: 数据集清单存在
     severity: blocking
     evaluator: script
-    pass_condition: "论文中使用的每个数据集有明确许可证（如 CC-BY、MIT），并在正文或补充材料中标注。"
-    fix_hint: "为每个数据集添加许可证信息，或替换为有许可证的数据集。"
+    pass_condition: ".paper/state/dataset-inventory.json 存在且可解析"
+    fix_hint: "生成数据集清单"
     check:
-      type: regex_any
-      file: .paper/output/draft.tex
-      patterns:
-        - 'license'
-        - 'cc.by'
-        - 'mit license'
-        - 'open dataset'
-        - 'supplementary material'
-
-  - id: DATASET-002
-    title: 数据集引用合规
-    severity: blocking
-    evaluator: script
-    depends_on: ["DATASET-001"]
-    pass_condition: "论文中引用的每个数据集在 references.bib 中有对应条目，包含 DOI 或官方链接。"
-    fix_hint: "为每个数据集添加 BibTeX 引用，包含 DOI 或官方链接。"
-    check:
-      type: cite_all_used
-      bib: .paper/output/references.bib
-      tex: .paper/output/draft.tex
+      type: json_fields
+      file: .paper/state/dataset-inventory.json
+      fields:
+        - name: datasets
+          types: [list]

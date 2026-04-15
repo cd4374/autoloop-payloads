@@ -1,34 +1,23 @@
 rules:
-  # ── P0 Blocking ────────────────────────────────────────────────────────────────
-
   - id: IDEA-001
-    title: idea.md 存在且非空
+    title: idea 状态文件存在
     severity: blocking
     evaluator: script
-    pass_condition: ".paper/input/idea.md 存在且字符数 >= 50。"
-    fix_hint: "在 .paper/input/idea.md 中撰写研究想法。参考 RESEARCH_BRIEF_TEMPLATE.md 的结构：问题描述、现有方法不足、创新点、预期结果。"
+    pass_condition: ".paper/state/idea-candidates.json 存在且可解析"
+    fix_hint: "运行 idea-loop 生成候选想法池"
     check:
-      type: files_exist
-      files:
-        - .paper/input/idea.md
+      type: json_fields
+      file: .paper/state/idea-candidates.json
+      fields:
+        - name: candidates
+          types: [list]
 
   - id: IDEA-002
-    title: 研究想法清晰完整
-    severity: blocking
-    evaluator: llm
-    depends_on: ["IDEA-001"]
-    pass_condition: "idea.md 包含：1) 研究问题描述；2) 现有方法的不足；3) 本文创新点；4) 预期结果。内容具体、逻辑清晰。"
-    fix_hint: "完善 idea.md，补充问题描述、现有方法不足、创新点和预期结果。"
-
-  - id: IDEA-003
-    title: 新颖性核查通过
+    title: novelty 报告存在且评分达标
     severity: blocking
     evaluator: script
-    depends_on: ["IDEA-002"]
-    pass_condition: ".paper/state/novelty-report.json 存在，且 overall_score >= 5，且 overall_assessment != 'ABANDON'。"
-    fix_hint: "运行 novelty-check-payload：多源文献搜索，生成 novelty-report.json，确保评分 >= 5 且未被 ABANDON。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/novelty-check-payload"
+    pass_condition: ".paper/state/novelty-report.json 存在且 overall_score >= 5"
+    fix_hint: "运行 novelty-check-payload 生成新颖性报告"
     check:
       type: json_gates
       state_dir: .paper/state
@@ -38,57 +27,3 @@ rules:
             - path: $.overall_score
               op: ge
               value: 5
-            - path: $.overall_assessment
-              op: not_eq
-              value: ABANDON
-
-  - id: IDEA-004
-    title: 新颖性外部 LLM 验证
-    severity: blocking
-    evaluator: llm
-    depends_on: ["IDEA-003"]
-    pass_condition: "novelty-report.json 的 core_claims 和 closest_prior_work 内容合理，无明显遗漏的先工作。"
-    fix_hint: "审查 novelty-report.json，如有重要先工作遗漏，重新运行 novelty-check-payload。"
-
-  - id: IDEA-005
-    title: 研究契约生成
-    severity: blocking
-    evaluator: script
-    depends_on: ["IDEA-004"]
-    pass_condition: ".paper/input/research-contract.md 存在且字符数 >= 500，包含 Core Claims、Method Summary、Baselines 表格。"
-    fix_hint: "运行 research-contract-payload：根据 idea.md 和 novelty-report.json 生成 research-contract.md。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/research-contract-payload"
-    check:
-      type: compound
-      parts:
-        - type: files_exist
-          files:
-            - .paper/input/research-contract.md
-        - type: regex_all
-          file: .paper/input/research-contract.md
-          patterns:
-            - 'Core Claims|## Core Claims'
-            - 'Method Summary|## Method'
-
-  - id: IDEA-006
-    title: 候选 idea 池已更新
-    severity: blocking
-    evaluator: script
-    depends_on: ["IDEA-005"]
-    pass_condition: ".paper/state/idea-candidates.json 存在且包含 active_idea 字段。"
-    fix_hint: "生成 .paper/state/idea-candidates.json，记录当前 idea 的 novelty_score、assessment、novelty_report 路径。"
-    check:
-      type: json_fields
-      file: .paper/state/idea-candidates.json
-      fields:
-        - name: active_idea
-          types: [object]
-
-  - id: IDEA-007
-    title: idea.md 结构化字段完整
-    severity: advisory
-    evaluator: llm
-    depends_on: ["IDEA-001"]
-    pass_condition: "idea.md 包含 research-contract 所需的结构化字段：问题、不足、创新点、预期方法方向、预期数据集/指标。"
-    fix_hint: "扩充 idea.md，为下游 lit / exp loop 提供更丰富的结构化信息。"

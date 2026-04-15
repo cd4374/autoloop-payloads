@@ -23,3 +23,9 @@ max_iter: 2
 ## 状态输出
 
 - `.paper/state/integrity-status.json`: 检查状态
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'integrity-loop 准备就绪，等待基座评估 criteria...'"

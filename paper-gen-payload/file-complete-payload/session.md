@@ -29,3 +29,9 @@ max_iter: 2
 - 所有必需文件存在且非空
 - 且在 hard gate 全通过时可验证 `Vx/` 结构
 - 或达到 MAX_ITER=2
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'file-complete-loop 准备就绪，等待基座评估 criteria...'"

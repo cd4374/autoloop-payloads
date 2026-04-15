@@ -25,3 +25,9 @@ max_iter: 3
 - `.paper/state/citation-status.json`: 验证状态、verified_count、hallucinated_count
 - `.paper/loop-logs/citation-round-{N}.json`: 各轮次验证结果
 - `.paper/output/citation-cards/`: 引文卡片目录（仅 Markdown）
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'citation-loop 准备就绪，等待基座评估 criteria...'"

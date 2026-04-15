@@ -38,3 +38,9 @@ max_iter: 2
 - **Context 压缩**：新会话恢复时，LLM 只需读这份契约，无需读完整 idea.md
 - **下游友好**：Method Summary 描述清晰，后续 lit / exp / writing agent 可独立推进
 - **Baseline 可追溯**：所有基线分数标注来源（论文引用或复现）
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'research-contract-loop 准备就绪，等待基座评估 criteria...'"

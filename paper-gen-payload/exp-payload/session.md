@@ -24,3 +24,9 @@ max_iter: 3
 
 - `.paper/state/experiment-status.json`: 实验状态和结果
 - `.paper/loop-logs/experiment-round-{N}.json`: 各轮次实验结果
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'exp-loop 准备就绪，等待基座评估 criteria...'"

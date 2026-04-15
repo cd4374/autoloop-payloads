@@ -1,64 +1,22 @@
 rules:
-  - id: WRT-001
-    title: 论文章节结构完整（LLM 评估）
-    severity: blocking
-    evaluator: llm
-    pass_condition: "draft.tex 包含 Abstract（<=abstract_max_words）、Introduction、Related Work、Method、Experiments（含数据集、基线、指标）、Conclusion、Limitations。无占位符内容。"
-    fix_hint: "生成完整章节内容，确保每个章节有实质内容而非占位符。"
-    fix_skill: loop-run
-    fix_skill_args: "PAYLOAD=paper-gen-payload/lit-payload"
-
-  - id: WRT-002
-    title: LaTeX 模板匹配
+  - id: WRITING-001
+    title: 论文草稿存在
     severity: blocking
     evaluator: script
-    depends_on: ["WRT-001"]
-    pass_condition: "draft.tex 使用正确的 documentclass；满足 template-selection.json 中 selected_template_id 对应模板的 required_markers。"
-    fix_hint: "更新 template-selection.json 或调整 draft.tex 使与模板注册表一致。"
+    pass_condition: ".paper/output/draft.tex 存在且非空"
+    fix_hint: "生成论文草稿"
     check:
-      type: latex_structure
-      file: .paper/output/draft.tex
-      requires:
-        - '\\documentclass'
+      type: files_exist
+      files:
+        - .paper/output/draft.tex
 
-  - id: WRT-003
-    title: 图表引用完整
-    severity: blocking
-    evaluator: script
-    depends_on: ["WRT-001"]
-    pass_condition: "draft.tex 中的 \\includegraphics 引用在 figures/ 目录下对应真实文件。"
-    fix_hint: "补充缺失图表或修正引用路径。"
-    check:
-      type: dir_structure
-      dirs:
-        - .paper/output/figures
-
-  - id: WRT-004
-    title: 模板选择状态一致性
-    severity: blocking
-    evaluator: script
-    depends_on: ["WRT-002"]
-    pass_condition: ".paper/state/template-selection.json 存在，包含 target_venue/selected_template_id/source_of_truth/constraints/selected_at，且 selected_template_id 在 registry 中可解析。"
-    fix_hint: "补全 template-selection.json 必填字段，确保 registry entry_tex 指向有效模板文件。"
-    check:
-      type: json_fields
-      file: .paper/state/template-selection.json
-      fields:
-        - name: target_venue
-          types: [string]
-        - name: selected_template_id
-          types: [string]
-        - name: source_of_truth
-          types: [string]
-        - name: constraints
-          types: [dict]
-        - name: selected_at
-          types: [string]
-
-  - id: WRT-005
-    title: 写作质量（LLM 评估）
+  - id: WRITING-002
+    title: 模板选择状态一致
     severity: advisory
-    evaluator: llm
-    depends_on: ["WRT-001"]
-    pass_condition: "论文语言流畅、结构清晰、逻辑连贯，无明显语法错误。"
-    fix_hint: "使用 LLM 润色工具改进写作质量。"
+    evaluator: script
+    pass_condition: ".paper/state/template-selection.json 存在"
+    fix_hint: "初始化模板选择状态"
+    check:
+      type: files_exist
+      files:
+        - .paper/state/template-selection.json

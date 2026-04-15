@@ -46,3 +46,9 @@ max_iter: 3
 
 - `.paper/output/draft.tex`: LaTeX 源文件
 - `.paper/state/template-selection.json`: 模板选择状态（target_venue/selected_template_id/source_of_truth/constraints/selected_at）
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'writing-loop 准备就绪，等待基座评估 criteria...'"

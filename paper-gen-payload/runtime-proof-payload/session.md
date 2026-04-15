@@ -29,3 +29,9 @@ max_iter: 2
 ## 状态输出
 
 - `.paper/state/runtime-proof.json`: 冒烟运行证据记录
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'runtime-proof-loop 准备就绪，等待基座评估 criteria...'"

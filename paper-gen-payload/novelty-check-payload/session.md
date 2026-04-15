@@ -59,3 +59,9 @@ max_iter: 2
 - 新颖性检查必须是 brutal honest — 假阳性浪费研究时间
 - "将 X 应用于 Y" 本身不算新颖，除非揭示了令人惊讶的洞察
 - 同时检查方法新颖性和实验设置新颖性
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'novelty-check 准备就绪，等待基座评估 criteria...'"

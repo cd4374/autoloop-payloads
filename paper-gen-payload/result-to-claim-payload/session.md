@@ -58,3 +58,9 @@ max_iter: 2
 - 不夸大主张：结果不支持的 claim 绝不圆滑
 - single positive result on one dataset ≠ general claim
 - confidence: high | medium | low — 低置信度视为 inconclusive，需补充实验
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'result-to-claim-loop 准备就绪，等待基座评估 criteria...'"

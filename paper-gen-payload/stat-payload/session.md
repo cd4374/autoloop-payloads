@@ -22,3 +22,9 @@ max_iter: 2
 ## 状态输出
 
 - `.paper/state/stat-status.json`: 统计检查状态
+
+## Actions
+
+### Step 1: 准备
+- action: bash
+  cmd: "echo 'stat-loop 准备就绪，等待基座评估 criteria...'"
