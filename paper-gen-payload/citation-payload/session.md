@@ -28,6 +28,12 @@ max_iter: 3
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'citation-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: arXiv 引用存在性验证
+- action: skill
+  skill: arxiv
+  args: "读取 .paper/output/references.bib，对每个引用验证 arXiv URL 可访问性，输出 .paper/loop-logs/citation-round-{N}.json"
+
+### Step 2: IEEE/ACM 引用存在性验证
+- action: skill
+  skill: semantic-scholar
+  args: "读取 .paper/output/references.bib，对每个正式发表论文验证 DOI/URL 可访问性"

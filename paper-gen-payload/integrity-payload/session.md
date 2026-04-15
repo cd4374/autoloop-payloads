@@ -26,6 +26,7 @@ max_iter: 2
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'integrity-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 论文数字审计
+- action: skill
+  skill: paper-claim-audit
+  args: "读取 .paper/output/draft.tex，验证论文中每个数字与 .paper/output/logs/ 中原始日志的一致性"

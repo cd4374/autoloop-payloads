@@ -3,12 +3,35 @@ rules:
     title: 所有 P0 子 payload 已完成
     severity: blocking
     evaluator: script
-    pass_condition: "所有 P0 子 loop 正常完成（status=keep）或达到 max_iter"
+    pass_condition: "所有 P0 子 loop 正常完成或达到 max_iter"
     fix_hint: "运行未完成的 P0 子 payload"
     check:
-      type: subpayload_done
-      payload: ./runtime-proof-payload
-      status: keep
+      type: compound
+      parts:
+        - type: subpayload_done
+          payload: ./runtime-proof-payload
+          status: any
+        - type: subpayload_done
+          payload: ./external-review-enforcer-payload
+          status: any
+        - type: subpayload_done
+          payload: ./evidence-trace-payload
+          status: any
+        - type: subpayload_done
+          payload: ./plagiarism-api-payload
+          status: any
+        - type: subpayload_done
+          payload: ./integrity-payload
+          status: any
+        - type: subpayload_done
+          payload: ./figure-payload
+          status: any
+        - type: subpayload_done
+          payload: ./review-payload
+          status: any
+        - type: subpayload_done
+          payload: ./citation-payload
+          status: any
 
   - id: ROOT-002
     title: 论文核心文件已生成
@@ -28,6 +51,14 @@ rules:
     pass_condition: "所有 P1 子 loop 已完成"
     fix_hint: "运行未完成的 P1 子 payload"
     check:
-      type: subpayload_done
-      payload: ./dataset-license-payload
-      status: any
+      type: compound
+      parts:
+        - type: subpayload_done
+          payload: ./dataset-license-payload
+          status: any
+        - type: subpayload_done
+          payload: ./stat-payload
+          status: any
+        - type: subpayload_done
+          payload: ./payload-linter-payload
+          status: any

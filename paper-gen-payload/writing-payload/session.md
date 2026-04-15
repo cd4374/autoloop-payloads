@@ -49,6 +49,22 @@ max_iter: 3
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'writing-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 生成论文大纲
+- action: skill
+  skill: paper-plan
+  args: "读取 .paper/input/research-contract.md 和实验结果，生成结构化论文大纲 PAPER_PLAN.md"
+
+### Step 2: 生成图表
+- action: skill
+  skill: paper-figure
+  args: "读取 PAPER_PLAN.md 中的 Figure Plan，从实验数据生成所有数据驱动图表到 figures/ 目录"
+
+### Step 3: 撰写论文
+- action: skill
+  skill: paper-write
+  args: "读取 PAPER_PLAN.md，调用 paper-plan 输出 venue 参数，按模板生成 .paper/output/draft.tex"
+
+### Step 4: 编译论文
+- action: skill
+  skill: paper-compile
+  args: "读取 .paper/output/draft.tex，编译生成 .paper/output/paper.pdf 并修复错误"

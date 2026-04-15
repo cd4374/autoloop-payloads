@@ -33,6 +33,12 @@ max_iter: 5
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'figure-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 生成数据驱动图表
+- action: skill
+  skill: paper-figure
+  args: "读取 PAPER_PLAN.md 中的 Figure Plan，从 .paper/output/experiment-results.json 生成数据驱动图表"
+
+### Step 2: 生成架构图
+- action: skill
+  skill: paper-illustration
+  args: "读取 .paper/input/research-contract.md 中的方法描述，生成架构图到 figures/ai_generated/"

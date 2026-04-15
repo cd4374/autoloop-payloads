@@ -61,6 +61,12 @@ max_iter: 2
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'result-to-claim-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 审计实验完整性
+- action: skill
+  skill: experiment-audit
+  args: "读取 .paper/output/logs/ 和 .paper/output/experiment-results.json，审计实验诚实度，输出 .paper/state/experiment-audit.json"
+
+### Step 2: 判定主张
+- action: skill
+  skill: result-to-claim
+  args: "读取 .paper/input/research-contract.md 和 .paper/output/experiment-results.json，判定实验结果支持哪些主张，输出 .paper/state/claim_verdict.json"

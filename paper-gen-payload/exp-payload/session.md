@@ -27,6 +27,17 @@ max_iter: 3
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'exp-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 制定实验计划
+- action: skill
+  skill: experiment-plan
+  args: "读取 .paper/input/research-contract.md，将研究方案转化为 claim 驱动的实验路线图，输出 EXPERIMENT_PLAN.md"
+
+### Step 2: 执行实验
+- action: skill
+  skill: run-experiment
+  args: "读取 EXPERIMENT_PLAN.md 和 .paper/state/compute-env.json，在检测到的计算环境上部署并运行实验"
+
+### Step 3: 分析实验结果
+- action: skill
+  skill: analyze-results
+  args: "读取 .paper/output/logs/ 中的实验日志，计算统计量并输出 .paper/output/experiment-results.json"

@@ -34,6 +34,17 @@ max_iter: 2
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'lit-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 文献调研
+- action: skill
+  skill: research-lit
+  args: "读取 .paper/input/research-contract.md，从相关工作出发搜索并分析论文，输出 .paper/state/lit-review.json"
+
+### Step 2: 补充 arXiv 预印本
+- action: skill
+  skill: arxiv
+  args: "搜索 .paper/state/lit-review.json 中未覆盖的关键论文的 arXiv 版本"
+
+### Step 3: 补充发表论文（IEEE/ACM）
+- action: skill
+  skill: semantic-scholar
+  args: "搜索 .paper/state/lit-review.json 中相关工作的正式发表版本（IEEE/ACM/Springer）"

@@ -62,6 +62,7 @@ max_iter: 2
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'novelty-check 准备就绪，等待基座评估 criteria...'"
+### Step 1: 核查新颖性
+- action: skill
+  skill: novelty-check
+  args: "读取 .paper/input/idea.md 中的研究想法，验证其新颖性，输出 .paper/state/novelty-report.json"

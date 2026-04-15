@@ -25,6 +25,12 @@ max_iter: 3
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'idea-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 生成候选想法
+- action: skill
+  skill: idea-creator
+  args: "读取 .paper/input/idea.md 中的研究方向，生成 3-5 个候选研究想法，写入 .paper/state/idea-candidates.json"
+
+### Step 2: 核查新颖性
+- action: skill
+  skill: novelty-check
+  args: "读取 .paper/state/idea-candidates.json 中评分最高的 idea，验证其新颖性并输出 .paper/state/novelty-report.json"

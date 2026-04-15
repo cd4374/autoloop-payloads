@@ -40,6 +40,7 @@ max_iter: 4
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'review-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 外部审查迭代
+- action: skill
+  skill: auto-review-loop
+  args: "审查 .paper/output/draft.tex，综合评分写入 .paper/state/review-status.json"

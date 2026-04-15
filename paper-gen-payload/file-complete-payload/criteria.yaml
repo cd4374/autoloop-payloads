@@ -25,15 +25,14 @@ rules:
     check:
       type: compound
       parts:
-        - type: latex_structure
-          file: .paper/output/draft.tex
-          requires:
-            - '\\documentclass'
-            - '\\begin{document}'
-            - '\\end{document}'
-        - type: cite_all_used
-          bib: .paper/output/references.bib
-          tex: .paper/output/draft.tex
+        - type: command
+          cmd: "bash scripts/latex-structure-check.sh .paper/output/draft.tex"
+          expects: exit_code
+          timeout: 30
+        - type: command
+          cmd: "bash scripts/cite-used-check.sh .paper/output/references.bib .paper/output/draft.tex"
+          expects: exit_code
+          timeout: 30
 
   - id: FILE-003
     title: Hard gate 证据就绪
@@ -77,12 +76,10 @@ rules:
     pass_condition: "项目根目录存在最新 Vx/ 目录，包含 code/、latex/、else-supports/ 三个子目录。"
     fix_hint: "在 hard gate 通过后创建 Vx 版本目录并复制对应文件。"
     check:
-      type: vx_package
-      project_root: .
-      subdirs:
-        - code
-        - latex
-        - else-supports
+      type: command
+      cmd: "bash scripts/vx-package-check.sh ."
+      expects: exit_code
+      timeout: 10
 
   - id: FILE-005
     title: release-package 状态文件完整

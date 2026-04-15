@@ -41,6 +41,7 @@ max_iter: 2
 
 ## Actions
 
-### Step 1: 准备
-- action: bash
-  cmd: "echo 'research-contract-loop 准备就绪，等待基座评估 criteria...'"
+### Step 1: 生成研究契约
+- action: skill
+  skill: research-refine
+  args: "读取 .paper/input/idea.md 和 .paper/state/novelty-report.json，将模糊想法细化为结构化研究方案，输出 .paper/input/research-contract.md"
